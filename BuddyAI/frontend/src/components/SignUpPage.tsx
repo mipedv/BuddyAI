@@ -110,7 +110,7 @@ const SignUpPage: React.FC = () => {
       {/* Right Panel (Image) */}
       <div className="hidden md:block w-1/2 relative">
         <img
-          src="/media/Screenshot 2025-07-23 135936.png"
+                      src="/login-illustration.png"
           alt="AI Teaching Classroom"
           className="object-cover h-full w-full"
         />

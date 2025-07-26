@@ -234,7 +234,7 @@ const MainContent: React.FC<MainContentProps> = ({
                     </svg>
                   ) : (
                     <img
-                      src="/media/button logo.png"
+                                              src="/button logo.png"
                       alt="Voice Mode"
                       className="w-6 h-6 object-contain"
                     />
