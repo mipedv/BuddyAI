@@ -64,6 +64,13 @@ class LLMService:
         self.vectorstore = None
         self.hybrid_retriever = None
         self.conversation_chain = None
+        
+        # Dynamic chunk control by level
+        self.k_values = {
+            "textbook": 2,
+            "detailed": 3,
+            "advanced": 4
+        }
     
     def _initialize_prompts(self):
         """Initialize prompt templates for different answer levels."""
@@ -135,14 +142,44 @@ class LLMService:
         except Exception as e:
             print(f"❌ Error setting up retrievers: {e}")
     
-    # Core business logic methods
-    def retrieve_chunks(self, query: str, k: int = 5) -> List[Document]:
+    # ✅ NEW: Modular retrieval logic with dynamic chunk control
+    def get_retriever(self, level: str, query: str):
         """
-        Retrieve relevant chunks from the vector store.
+        Get a configured retriever based on the answer level and query.
+        
+        Args:
+            level: The answer level (textbook, detailed, advanced)
+            query: The user's query
+            
+        Returns:
+            Configured retriever with appropriate k value
+        """
+        if not self.vectorstore:
+            return None
+            
+        # Get dynamic k value based on level
+        k = self.k_values.get(level, 3)
+        
+        # Create retriever with dynamic k
+        retriever = self.vectorstore.as_retriever(
+            search_kwargs={
+                "k": k,
+                # Future: metadata-based filtering
+                # "filter": {"chapter": "Solar System"}  # uncomment when metadata is available
+            }
+        )
+        
+        print(f"📊 Using k={k} chunks for level: {level}")
+        return retriever
+    
+    # ✅ UPDATED: Enhanced retrieve_chunks with level-aware logic
+    def retrieve_chunks(self, query: str, level: str = "textbook") -> List[Document]:
+        """
+        Retrieve relevant chunks from the vector store with level-aware logic.
         
         Args:
             query: The user's question
-            k: Number of chunks to retrieve
+            level: The answer level (textbook, detailed, advanced)
             
         Returns:
             List of relevant document chunks
@@ -152,9 +189,21 @@ class LLMService:
             return []
         
         try:
+            # Get dynamic k value based on level
+            k = self.k_values.get(level, 3)
+            
+            # Retrieve chunks
             chunks = self.vectorstore.similarity_search(query, k=k)
-            print(f"📚 Retrieved {len(chunks)} chunks for: {query[:50]}...")
+            print(f"📚 Retrieved {len(chunks)} chunks for: {query[:50]}... (level: {level})")
+            
+            # ✅ Early check for textbook mode: content must be present
+            if level == "textbook" and chunks:
+                if not any(query.lower() in chunk.page_content.lower() for chunk in chunks):
+                    print("⚠️ No relevant textbook content found for query")
+                    return []  # This will trigger fallback handling
+            
             return chunks
+            
         except Exception as e:
             print(f"❌ Error retrieving chunks: {e}")
             return []
@@ -174,52 +223,115 @@ class LLMService:
         prompt_prefix = self.PROMPTS.get(level, self.PROMPTS["textbook"])
         return f"{prompt_prefix} {question}"
     
-    def generate_textbook_answer(self, message: str, history: List[Dict] = None) -> str:
-        """Generate answer using textbook retrieval."""
+    # ✅ UPDATED: Enhanced textbook answer generation with fallback handling
+    def generate_textbook_answer(self, message: str, history: List[Dict] = None) -> Dict[str, Any]:
+        """Generate answer using textbook retrieval with enhanced validation."""
+        # Retrieve chunks with level-aware logic
+        chunks = self.retrieve_chunks(message, "textbook")
+        
+        # ✅ Fallback handling: If no chunks returned at all
+        if not chunks:
+            return {
+                "success": False,
+                "answer": f"Sorry, I couldn't find any relevant content in the textbook for: {message}",
+                "suggested_questions": []
+            }
+        
+        # ✅ Early check for textbook mode: content must be present
+        if not any(message.lower() in chunk.page_content.lower() for chunk in chunks):
+            return {
+                "success": False,
+                "answer": f"No relevant textbook content found for: {message}",
+                "suggested_questions": []
+            }
+        
+        # Generate answer using conversation chain if available
         if self.conversation_chain:
             try:
                 result = self.conversation_chain.invoke({
                     "question": message,
                     "chat_history": history or []
                 })
-                return result["answer"]
+                return {
+                    "success": True,
+                    "answer": result["answer"],
+                    "suggested_questions": self.generate_suggested_questions(result["answer"])
+                }
             except Exception as e:
                 print(f"❌ Error with conversation chain: {e}")
-                return "This is a textbook answer based on the retrieved content..."
+                return {
+                    "success": False,
+                    "answer": "Error processing your question with the textbook content.",
+                    "suggested_questions": []
+                }
         else:
-            return "This is a textbook answer based on the retrieved content..."
+            # Fallback: construct answer from chunks directly
+            context = "\n\n".join([chunk.page_content for chunk in chunks])
+            prompt = f"{self.PROMPTS['textbook']}\n\nContext: {context}\n\nQuestion: {message}"
+            
+            try:
+                response = self.llm.invoke(prompt)
+                answer = response.content.strip()
+                return {
+                    "success": True,
+                    "answer": answer,
+                    "suggested_questions": self.generate_suggested_questions(answer)
+                }
+            except Exception as e:
+                print(f"❌ Error generating textbook answer: {e}")
+                return {
+                    "success": False,
+                    "answer": "Error generating answer from textbook content.",
+                    "suggested_questions": []
+                }
     
     def generate_detailed_answer(self, message: str, base_answer: str = None) -> str:
         """Generate a more detailed explanation."""
-        if not base_answer:
-            base_answer = self.generate_textbook_answer(message)
+        # Retrieve chunks for detailed level
+        chunks = self.retrieve_chunks(message, "detailed")
+        
+        if not chunks:
+            return "Sorry, I couldn't find enough content to provide a detailed explanation."
+        
+        # Use chunks as context for detailed explanation
+        context = "\n\n".join([chunk.page_content for chunk in chunks])
         
         try:
-            detailed_prompt = f"""Using the following textbook content as a source, explain it in a clearer and more detailed way. Use simple analogies or real-world examples if helpful, but stay close to the textbook content. Assume the reader is a middle school student.
+            detailed_prompt = f"""{self.PROMPTS['detailed']}
 
-Textbook Content:
-{base_answer}"""
+Context from textbook:
+{context}
+
+Question: {message}"""
             
             response = self.llm.invoke(detailed_prompt)
             return response.content.strip()
         except Exception as e:
             print(f"❌ Error generating detailed answer: {e}")
-            return "This is a detailed explanation with examples and analogies..."
+            return "Error generating detailed explanation."
     
     def generate_advanced_answer(self, message: str) -> str:
         """Generate an advanced explanation with deep context."""
+        # Retrieve chunks for advanced level
+        chunks = self.retrieve_chunks(message, "advanced")
+        
+        # For advanced level, we can work with or without chunks
+        context = ""
+        if chunks:
+            context = f"\n\nTextbook reference:\n" + "\n\n".join([chunk.page_content for chunk in chunks])
+        
         try:
-            advanced_prompt = f"""Go beyond a simple answer. Provide a deep, structured explanation for the following question. Include scientific reasoning, historical context, and real-world applications where relevant. Assume the reader is curious and intelligent.
+            advanced_prompt = f"""{self.PROMPTS['advanced']}
 
-Question:
-{message}"""
+Question: {message}{context}"""
             
             response = self.llm.invoke(advanced_prompt)
             return response.content.strip()
         except Exception as e:
             print(f"❌ Error generating advanced answer: {e}")
-            return "This is an advanced explanation with scientific reasoning and historical context..."
+            return "Error generating advanced explanation."
     
+    # ✅ UPDATED: Main answer generation with enhanced error handling
     def generate_answer(self, message: str, level: str = "textbook", history: List[Dict] = None) -> str:
         """
         Main method to generate answers based on level.
@@ -240,8 +352,11 @@ Question:
         
         try:
             if level == "textbook":
-                print("📘 Using textbook retriever")
-                return self.generate_textbook_answer(message, history)
+                print("📘 Using textbook retriever with validation")
+                result = self.generate_textbook_answer(message, history)
+                if not result.get("success", True):
+                    return result["answer"]  # Return error message
+                return result["answer"]
             
             elif level == "detailed":
                 print("📗 Generating detailed explanation")
@@ -343,7 +458,7 @@ Question:
             print(f"❌ Error loading chat file: {e}")
             return []
     
-    # Main interface method
+    # ✅ UPDATED: Enhanced main interface method
     def get_chat_response(self, message: str, level: str = "textbook", history: List[Dict] = None) -> Dict[str, Any]:
         """
         Get a complete chat response including answer and suggested questions.
@@ -356,16 +471,32 @@ Question:
         Returns:
             Dictionary containing answer and suggested questions
         """
-        # Generate the answer
-        answer = self.generate_answer(message, level, history)
+        # For textbook level, use the enhanced method that returns structured response
+        if level == "textbook":
+            result = self.generate_textbook_answer(message, history)
+            if not result.get("success", True):
+                return {
+                    "answer": result["answer"],
+                    "suggested_questions": [],
+                    "level": level,
+                    "success": False
+                }
+            return {
+                "answer": result["answer"],
+                "suggested_questions": result["suggested_questions"],
+                "level": level,
+                "success": True
+            }
         
-        # Generate suggested questions
+        # For other levels, use the regular flow
+        answer = self.generate_answer(message, level, history)
         suggested_questions = self.generate_suggested_questions(answer)
         
         return {
             "answer": answer,
             "suggested_questions": suggested_questions,
-            "level": level
+            "level": level,
+            "success": True
         }
     
     # Utility methods
@@ -376,6 +507,7 @@ Question:
             "vectorstore_available": self.vectorstore is not None,
             "conversation_chain_ready": self.conversation_chain is not None,
             "api_key_configured": bool(self.openai_api_key),
+            "k_values_configured": self.k_values,
         }
 
 
@@ -392,6 +524,6 @@ def get_suggestions(answer: str) -> List[str]:
     """Convenience function to get follow-up questions."""
     return llm_service.generate_suggested_questions(answer)
 
-def search_knowledge(query: str) -> List[Document]:
+def search_knowledge(query: str, level: str = "textbook") -> List[Document]:
     """Convenience function to search the knowledge base."""
-    return llm_service.retrieve_chunks(query)
+    return llm_service.retrieve_chunks(query, level)
