@@ -176,3 +176,19 @@ SIMPLE_JWT = {
     'JWK_URL': None,
     'LEEWAY': 0,
 }
+
+# Google Search API Configuration
+# Get these from Google Cloud Console:
+# 1. Create a project at https://console.cloud.google.com/
+# 2. Enable Custom Search API
+# 3. Create API key
+# 4. Create Custom Search Engine at https://cse.google.com/cse/
+
+try:
+    from google_api_config import GOOGLE_SEARCH_API_KEY, GOOGLE_SEARCH_ENGINE_ID
+except ImportError:
+    # Fallback if config file doesn't exist or has issues
+    GOOGLE_SEARCH_API_KEY = None
+    GOOGLE_SEARCH_ENGINE_ID = None
+    print("⚠️ Google API configuration not found. Using fallback mode.")
+    print("📝 Please configure google_api_config.py for real search results.")

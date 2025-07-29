@@ -196,11 +196,25 @@ class LLMService:
             chunks = self.vectorstore.similarity_search(query, k=k)
             print(f"📚 Retrieved {len(chunks)} chunks for: {query[:50]}... (level: {level})")
             
-            # ✅ Early check for textbook mode: content must be present
+            # ✅ More flexible content matching for textbook mode
             if level == "textbook" and chunks:
-                if not any(query.lower() in chunk.page_content.lower() for chunk in chunks):
+                # Use a more flexible matching strategy
+                def is_relevant(query, chunk):
+                    query_words = set(query.lower().split())
+                    chunk_words = set(chunk.page_content.lower().split())
+                    
+                    # Check if there's a significant overlap of words
+                    overlap = query_words.intersection(chunk_words)
+                    return len(overlap) / len(query_words) > 0.2  # At least 20% word match
+                
+                # Filter chunks based on relevance
+                relevant_chunks = [chunk for chunk in chunks if is_relevant(query, chunk)]
+                
+                if not relevant_chunks:
                     print("⚠️ No relevant textbook content found for query")
                     return []  # This will trigger fallback handling
+                
+                return relevant_chunks
             
             return chunks
             
@@ -234,15 +248,7 @@ class LLMService:
             return {
                 "success": False,
                 "answer": f"Sorry, I couldn't find any relevant content in the textbook for: {message}",
-                "suggested_questions": []
-            }
-        
-        # ✅ Early check for textbook mode: content must be present
-        if not any(message.lower() in chunk.page_content.lower() for chunk in chunks):
-            return {
-                "success": False,
-                "answer": f"No relevant textbook content found for: {message}",
-                "suggested_questions": []
+                "suggested_questions": self.generate_suggested_questions(message)
             }
         
         # Generate answer using conversation chain if available
@@ -258,32 +264,29 @@ class LLMService:
                     "suggested_questions": self.generate_suggested_questions(result["answer"])
                 }
             except Exception as e:
-                print(f"❌ Error with conversation chain: {e}")
-                return {
-                    "success": False,
-                    "answer": "Error processing your question with the textbook content.",
-                    "suggested_questions": []
-                }
-        else:
-            # Fallback: construct answer from chunks directly
-            context = "\n\n".join([chunk.page_content for chunk in chunks])
-            prompt = f"{self.PROMPTS['textbook']}\n\nContext: {context}\n\nQuestion: {message}"
+                print(f"❌ Conversation chain error: {e}")
+        
+        # Fallback to direct LLM generation
+        context = f"\n\nTextbook reference:\n" + "\n\n".join([chunk.page_content for chunk in chunks])
+        
+        try:
+            advanced_prompt = f"""{self.PROMPTS['advanced']}
             
-            try:
-                response = self.llm.invoke(prompt)
-                answer = response.content.strip()
-                return {
-                    "success": True,
-                    "answer": answer,
-                    "suggested_questions": self.generate_suggested_questions(answer)
-                }
-            except Exception as e:
-                print(f"❌ Error generating textbook answer: {e}")
-                return {
-                    "success": False,
-                    "answer": "Error generating answer from textbook content.",
-                    "suggested_questions": []
-                }
+Question: {message}{context}"""
+            
+            response = self.llm.invoke(advanced_prompt)
+            return {
+                "success": True,
+                "answer": response.content.strip(),
+                "suggested_questions": self.generate_suggested_questions(response.content.strip())
+            }
+        except Exception as e:
+            print(f"❌ Error generating advanced answer: {e}")
+            return {
+                "success": False,
+                "answer": "Error generating explanation.",
+                "suggested_questions": self._get_topic_specific_questions(message)
+            }
     
     def generate_detailed_answer(self, message: str, base_answer: str = None) -> str:
         """Generate a more detailed explanation."""
@@ -373,33 +376,121 @@ Question: {message}{context}"""
             print(f"❌ ERROR: {e}")
             return f"⚠️ Something went wrong: {str(e)}"
     
-    def generate_suggested_questions(self, content: str, count: int = 3) -> List[str]:
+    def generate_suggested_questions(self, context: str) -> List[str]:
         """
-        Generate suggested follow-up questions based on the content.
+        Generate suggested questions based on the context.
         
         Args:
-            content: The content to base suggestions on
-            count: Number of questions to generate
-            
+            context (str): The context from which to generate suggested questions
+        
         Returns:
-            List of suggested questions
+            List[str]: A list of suggested questions
         """
         try:
-            prompt = self.SUGGEST_QUESTIONS_PROMPT.format(content=str(content).strip())
+            # If context is too short, return default questions
+            if len(context) < 50:
+                return [
+                    "Can you explain more about this topic?",
+                    "What are the key points?",
+                    "Are there any related concepts?"
+                ]
             
-            response = self.llm.invoke(prompt)
-            suggestions = response.content.strip().split("\n")
-            cleaned = [s.strip(" -•123.").strip() for s in suggestions if s.strip() and len(s.strip()) > 5]
+            # Create a more specific prompt for better question generation
+            suggested_questions_prompt = f"""
+Based on the following educational content about science topics, generate exactly 3 clear, 
+specific follow-up questions that a student might ask to learn more. 
+
+The questions should be:
+- Directly related to the content
+- Easy to understand
+- Encouraging further learning
+- Complete sentences ending with question marks
+
+Content: {context[:500]}
+
+Please provide only the 3 questions, one per line, without numbering or bullet points.
+"""
             
-            # Ensure we have exactly the requested count
-            while len(cleaned) < count:
-                cleaned.append("")
+            response = self.llm.invoke(suggested_questions_prompt)
             
-            return cleaned[:count]
+            # Parse the response more reliably
+            response_text = response.content.strip()
             
+            # Split by lines and clean up
+            lines = [line.strip() for line in response_text.split('\n') if line.strip()]
+            
+            # Filter and clean questions
+            questions = []
+            for line in lines:
+                # Remove numbering, bullets, and other formatting
+                cleaned = line.strip()
+                # Remove common prefixes
+                for prefix in ['1.', '2.', '3.', '-', '•', '*', 'Q:', 'Question:']:
+                    if cleaned.startswith(prefix):
+                        cleaned = cleaned[len(prefix):].strip()
+                
+                # Ensure it ends with a question mark
+                if cleaned and not cleaned.endswith('?'):
+                    cleaned += '?'
+                
+                # Only add if it's a reasonable length and contains content
+                if cleaned and len(cleaned) > 10 and len(cleaned) < 200:
+                    questions.append(cleaned)
+            
+            # Ensure we have exactly 3 questions
+            if len(questions) >= 3:
+                return questions[:3]
+            elif len(questions) > 0:
+                # If we have some questions but not enough, pad with defaults
+                default_questions = [
+                    "What are the main components mentioned?",
+                    "How does this relate to other topics?",
+                    "Can you provide more details about this?"
+                ]
+                while len(questions) < 3:
+                    questions.append(default_questions[len(questions) - 1])
+                return questions
+            else:
+                # Fallback to topic-specific defaults
+                return self._get_topic_specific_questions(context)
+        
         except Exception as e:
-            print(f"Error generating suggestions: {str(e)}")
-            return [""] * count
+            print(f"❌ Error generating suggested questions: {e}")
+            # Default fallback questions
+            return [
+                "Can you explain more about this topic?",
+                "What are the key points?",
+                "Are there any related concepts?"
+            ]
+    
+    def _get_topic_specific_questions(self, context: str) -> List[str]:
+        """Generate topic-specific default questions based on context keywords."""
+        context_lower = context.lower()
+        
+        if 'solar system' in context_lower or 'planet' in context_lower:
+            return [
+                "What are the main planets in our solar system?",
+                "How do planets orbit around the Sun?",
+                "What makes Earth different from other planets?"
+            ]
+        elif 'sun' in context_lower or 'star' in context_lower:
+            return [
+                "How does the Sun produce energy?",
+                "What would happen if the Sun disappeared?",
+                "How big is the Sun compared to Earth?"
+            ]
+        elif 'moon' in context_lower:
+            return [
+                "Why does the Moon have phases?",
+                "How does the Moon affect Earth's tides?",
+                "How far is the Moon from Earth?"
+            ]
+        else:
+            return [
+                "Can you explain more about this topic?",
+                "What are the key points to remember?",
+                "How does this connect to other concepts?"
+            ]
     
     # File operations
     def save_chat_to_file(self, history: List[Dict]) -> str:
@@ -475,9 +566,13 @@ Question: {message}{context}"""
         if level == "textbook":
             result = self.generate_textbook_answer(message, history)
             if not result.get("success", True):
+                # Even on error, provide relevant suggested questions
+                suggested_questions = result.get("suggested_questions", [])
+                if not suggested_questions:
+                    suggested_questions = self._get_topic_specific_questions(message)
                 return {
                     "answer": result["answer"],
-                    "suggested_questions": [],
+                    "suggested_questions": suggested_questions,
                     "level": level,
                     "success": False
                 }
