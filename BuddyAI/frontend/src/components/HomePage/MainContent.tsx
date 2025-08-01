@@ -114,12 +114,6 @@ const MainContent: React.FC<MainContentProps> = ({
     navigate('/chapter');
   };
 
-  // Function to handle image search
-  const handleImageSearch = () => {
-    const searchQuery = query.trim() || 'solar system';
-    navigate(`/media-gallery?q=${encodeURIComponent(searchQuery)}&type=images`);
-  };
-
   return (
     <div className="flex flex-col h-full">
       <div className="flex justify-between items-center p-4 bg-[#f6f6f1]">
@@ -220,7 +214,7 @@ const MainContent: React.FC<MainContentProps> = ({
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && handleSubmit()}
-                className="bg-transparent text-gray-800 placeholder-gray-400 outline-none w-full pr-28"
+                className="bg-transparent text-gray-800 placeholder-gray-400 outline-none w-full pr-20"
                 disabled={loading} // Disable input while loading
               />
 
@@ -273,25 +267,6 @@ const MainContent: React.FC<MainContentProps> = ({
                       className="w-6 h-6 object-contain"
                     />
                   )}
-                </button>
-
-                {/* Image Search Button */}
-                <button
-                  onClick={handleImageSearch}
-                  className="w-8 h-8 bg-white border border-gray-200 rounded-full flex items-center justify-center
-                    transition-all duration-200 hover:bg-gray-100 hover:scale-105 active:scale-95"
-                  title="Image Search"
-                  disabled={loading}
-                >
-                  <svg 
-                    xmlns="http://www.w3.org/2000/svg" 
-                    className="h-4 w-4 text-gray-600" 
-                    fill="none" 
-                    viewBox="0 0 24 24" 
-                    stroke="currentColor"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 002 2z" />
-                  </svg>
                 </button>
               </div>
             </div>

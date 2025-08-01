@@ -42,7 +42,7 @@ def get_answer(request):
     
     try:
         # Retrieve relevant chunks
-        chunks = llm_service.retrieve_chunks(query)
+        chunks = llm_service.retrieve_textbook_chunks(query)
         
         # Generate answer using the service
         answer = llm_service.generate_answer(query, level)
@@ -124,7 +124,7 @@ def get_answer_post(request):
         response = llm_service.get_chat_response(query, level, history)
         
         # Retrieve chunks for additional context
-        chunks = llm_service.retrieve_chunks(query)
+        chunks = llm_service.retrieve_textbook_chunks(query)
         
         # Prepare response
         response_data = {

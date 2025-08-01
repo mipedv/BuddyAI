@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Share2, Search, Video, Volume2, RefreshCw, FileText, BookOpen } from 'lucide-react';
+import { Share2, Search, Video, RefreshCw, FileText, BookOpen, Edit3, ThumbsUp, ThumbsDown, Copy, MoreHorizontal } from 'lucide-react';
 import axios from 'axios';
 
 const ResponsePage: React.FC = () => {
@@ -14,6 +14,13 @@ const ResponsePage: React.FC = () => {
 
   // Add state for voice mode
   const [isVoiceMode, setIsVoiceMode] = useState(false);
+  
+  // Add states for new features
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedQuery, setEditedQuery] = useState('');
+  const [rating, setRating] = useState<'up' | 'down' | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [showMoreOptions, setShowMoreOptions] = useState(false);
 
   const images = {
     main: '/media/main.png',
@@ -43,6 +50,20 @@ const ResponsePage: React.FC = () => {
       navigate('/home');
     }
   }, [location, navigate]);
+
+  // Close more options dropdown when clicking outside
+  React.useEffect(() => {
+    const handleClickOutside = () => {
+      if (showMoreOptions) {
+        setShowMoreOptions(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showMoreOptions]);
 
   if (!response) {
     return (
@@ -139,10 +160,117 @@ const ResponsePage: React.FC = () => {
     navigate(`/media-gallery?q=${encodeURIComponent(query)}&type=${type}`);
   };
 
-  // Function to handle image search from input
-  const handleImageSearchFromInput = () => {
-    const searchQuery = followUpQuery.trim() || response?.query || 'solar system';
-    navigate(`/media-gallery?q=${encodeURIComponent(searchQuery)}&type=images`);
+  // Function to handle edit query
+  const handleEditQuery = () => {
+    setIsEditing(true);
+    setEditedQuery(response?.query || '');
+  };
+
+  // Function to save edited query
+  const handleSaveEdit = async () => {
+    if (!editedQuery.trim()) return;
+    
+    try {
+      setIsLoading(true);
+      const apiResponse = await axios.get(`http://localhost:8000/api/core/get-answer/`, {
+        params: {
+          query: editedQuery,
+          level: getLevelForBackend(explanationType)
+        }
+      });
+
+      // Update the response with new data
+      setResponse({
+        ...response,
+        query: editedQuery,
+        answer: apiResponse.data.answer,
+        suggested_questions: apiResponse.data.suggested_questions,
+        level: getLevelForBackend(explanationType)
+      });
+
+      // Update URL without page reload
+      const newUrl = `/response?query=${encodeURIComponent(editedQuery)}&level=${getLevelForBackend(explanationType)}`;
+      window.history.pushState(null, '', newUrl);
+
+      setIsEditing(false);
+    } catch (err: any) {
+      console.error('Error updating query:', err);
+      setError(err.response?.data?.error || 'Failed to update query. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Function to cancel edit
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    setEditedQuery('');
+  };
+
+  // Function to handle share
+  const handleShare = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: `BuddyAI - ${displayQuery}`,
+          text: response?.answer || '',
+          url: window.location.href,
+        });
+      } catch (err) {
+        console.log('Error sharing:', err);
+        handleCopyToClipboard();
+      }
+    } else {
+      handleCopyToClipboard();
+    }
+  };
+
+  // Function to handle rewrite
+  const handleRewrite = async () => {
+    if (!response?.query || isLoading) return;
+
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      const apiResponse = await axios.get(`http://localhost:8000/api/core/get-answer/`, {
+        params: {
+          query: response.query,
+          level: getLevelForBackend(explanationType)
+        }
+      });
+
+      // Update the response with new data
+      setResponse({
+        ...response,
+        answer: apiResponse.data.answer,
+        suggested_questions: apiResponse.data.suggested_questions,
+      });
+
+    } catch (err: any) {
+      console.error('Error rewriting answer:', err);
+      setError(err.response?.data?.error || 'Failed to rewrite answer. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Function to handle rating
+  const handleRating = (type: 'up' | 'down') => {
+    setRating(rating === type ? null : type);
+    // TODO: Send rating to backend
+    console.log(`Rated: ${type}`);
+  };
+
+  // Function to copy to clipboard
+  const handleCopyToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(response?.answer || '');
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
   };
 
   return (
@@ -256,36 +384,78 @@ const ResponsePage: React.FC = () => {
           {/* Left Column - Main Q&A Section (70%) */}
           <div className="w-[70%] h-full overflow-y-auto p-8 bg-white">
             {/* Question Header */}
-            <div className="flex items-start justify-between mb-6">
-              <div className="flex-1">
-                <div className="flex items-center gap-4 mb-3">
-                  <h1 className="text-2xl font-bold">{displayQuery}</h1>
-                  <button className="p-2 rounded-full hover:bg-gray-100" title="Listen to answer">
-                    <Volume2 className="w-5 h-5 text-gray-600" />
-                  </button>
+            <div className="mb-6">
+              <div className="flex items-center gap-4 mb-3">
+                {isEditing ? (
+                  <div className="flex items-center gap-2 flex-1">
+                    <input
+                      type="text"
+                      value={editedQuery}
+                      onChange={(e) => setEditedQuery(e.target.value)}
+                      className="text-2xl font-bold bg-transparent border-b-2 border-blue-500 outline-none flex-1"
+                      autoFocus
+                    />
+                    <button 
+                      onClick={handleSaveEdit}
+                      className="px-3 py-1 bg-blue-500 text-white rounded text-sm hover:bg-blue-600"
+                      disabled={isLoading}
+                    >
+                      Save
+                    </button>
+                    <button 
+                      onClick={handleCancelEdit}
+                      className="px-3 py-1 bg-gray-500 text-white rounded text-sm hover:bg-gray-600"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <h1 className="text-2xl font-bold">{displayQuery}</h1>
+                    <button 
+                      onClick={handleEditQuery}
+                      className="p-2 -mr-2 rounded-full hover:bg-gray-100" 
+                      title="Edit query"
+                    >
+                      <Edit3 className="w-5 h-5 text-gray-600" />
+                    </button>
+                  </>
+                )}
+              </div>
+              
+              <div className="flex items-center justify-between mt-2">
+                <div className="flex items-center gap-2">
+                  {/* Answer Label */}
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-gray-700">
+                    <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.477 2 12C2 17.523 6.477 22 12 22C17.523 22 22 17.523 22 12C22 6.477 17.523 2 12 2ZM8 7.5V16.5L16 12L8 7.5Z" fill="currentColor"/>
+                  </svg>
+                  <span className="text-sm text-gray-700 font-medium">Answer</span>
                 </div>
-                <div className="flex items-center gap-3">
+
+                <div className="flex items-center gap-4">
+                  {/* Voice Mode Button */}
+                  <button className="w-10 h-10 bg-white border border-gray-200 rounded-full flex items-center justify-center transition-all duration-200 hover:bg-gray-100 hover:scale-105 active:scale-95" title="Listen to answer">
+                    <img
+                      src="/media/button logo.png"
+                      alt="Voice Mode"
+                      className="w-7 h-7 object-contain"
+                    />
+                  </button>
+
+                  {/* Explanation Level Dropdown */}
                   <select
                     value={explanationType}
                     onChange={(e) => handleExplanationTypeChange(e.target.value)}
-                    disabled={isLoading}
-                    className={`px-3 py-1.5 rounded-lg border text-sm bg-white ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    disabled={isLoading || isEditing}
+                    className={`px-4 py-2.5 rounded-lg border border-gray-300 text-base bg-white min-w-[200px] font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${isLoading || isEditing ? 'opacity-50 cursor-not-allowed' : 'hover:border-gray-400'}`}
                   >
                     <option>Textbook Explanation</option>
                     <option>Detailed Explanation</option>
                     <option>Advanced Explanation</option>
                   </select>
-                  {isLoading && (
-                    <div className="flex items-center gap-2 text-sm text-blue-600">
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                      <span>Loading...</span>
-                    </div>
-                  )}
                 </div>
               </div>
-              <button className="p-2 rounded-full hover:bg-gray-100" title="Share answer">
-                <Share2 className="w-5 h-5 text-gray-600" />
-              </button>
+              <div className="border-b border-gray-200 mt-4"></div> {/* Underline */}
             </div>
 
             {/* Error Display */}
@@ -313,21 +483,69 @@ const ResponsePage: React.FC = () => {
                   response.answer
                 )}
               </div>
-              <div className="flex items-center gap-4 mt-4">
-                <button 
-                  className={`flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  disabled={isLoading}
-                >
-                  <Share2 className="w-4 h-4" />
-                  Share
-                </button>
-                <button 
-                  className={`flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  disabled={isLoading}
-                >
-                  <RefreshCw className="w-4 h-4" />
-                  Rewrite
-                </button>
+              <div className="flex items-center justify-between mt-6">
+                <div className="flex items-center gap-4">
+                  <button 
+                    onClick={handleShare}
+                    className={`flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    disabled={isLoading}
+                  >
+                    <Share2 className="w-4 h-4" />
+                    Share
+                  </button>
+                  <button 
+                    onClick={handleRewrite}
+                    className={`flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    disabled={isLoading}
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    Rewrite
+                  </button>
+                  <button 
+                    onClick={handleCopyToClipboard}
+                    className={`flex items-center gap-2 text-sm ${copied ? 'text-green-600' : 'text-gray-500 hover:text-gray-700'} ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    disabled={isLoading}
+                  >
+                    <Copy className="w-4 h-4" />
+                    {copied ? 'Copied!' : 'Copy'}
+                  </button>
+                  <div className="relative">
+                    <button 
+                      onClick={() => setShowMoreOptions(!showMoreOptions)}
+                      className={`flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      disabled={isLoading}
+                    >
+                      <MoreHorizontal className="w-4 h-4" />
+                    </button>
+                    {showMoreOptions && (
+                      <div className="absolute top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-10 min-w-[120px]">
+                        <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                          Save to Library
+                        </button>
+                        <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                          Report Issue
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                {/* Rating Section */}
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-500">Rate this answer:</span>
+                  <button 
+                    onClick={() => handleRating('up')}
+                    className={`p-1 rounded-full hover:bg-gray-100 ${rating === 'up' ? 'bg-green-100 text-green-600' : 'text-gray-500'}`}
+                  >
+                    <ThumbsUp className="w-4 h-4" />
+                  </button>
+                  <button 
+                    onClick={() => handleRating('down')}
+                    className={`p-1 rounded-full hover:bg-gray-100 ${rating === 'down' ? 'bg-red-100 text-red-600' : 'text-gray-500'}`}
+                  >
+                    <ThumbsDown className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -373,7 +591,7 @@ const ResponsePage: React.FC = () => {
                     onChange={(e) => setFollowUpQuery(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleFollowUpSubmit()}
                     placeholder="Ask follow-up"
-                    className="w-full px-4 py-3 pr-24 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-4 py-3 pr-12 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 )}
                 <div className="absolute right-2 top-1/2 transform -translate-y-1/2 flex items-center space-x-2">
@@ -419,23 +637,6 @@ const ResponsePage: React.FC = () => {
                       />
                     )}
                   </button>
-
-                  {/* Image Search Button */}
-                  <button 
-                    onClick={handleImageSearchFromInput}
-                    className="w-10 h-10 bg-white border border-gray-200 rounded-full flex items-center justify-center hover:bg-gray-100 transition-colors"
-                    title="Image Search"
-                  >
-                    <svg 
-                      xmlns="http://www.w3.org/2000/svg" 
-                      className="h-5 w-5 text-gray-600" 
-                      fill="none" 
-                      viewBox="0 0 24 24" 
-                      stroke="currentColor"
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                    </svg>
-                  </button>
                 </div>
               </div>
             </div>
@@ -450,7 +651,7 @@ const ResponsePage: React.FC = () => {
                 alt="Main visualization"
                 className="w-full aspect-video rounded-xl object-cover mb-4"
               />
-              <div className="grid grid-cols-2 gap-4 mb-4">
+              <div className="grid grid-cols-2 gap-4 mb-0">
                 {images.thumbnails.map((src, index) => (
                   <img
                     key={index}
@@ -458,12 +659,11 @@ const ResponsePage: React.FC = () => {
                     alt={`Thumbnail ${index + 1}`}
                     className="w-full aspect-video rounded-xl object-cover"
                   />
-                ))
-              }
+                ))}
               </div>
               <button 
                 onClick={() => handleMediaNavigation('images')}
-                className="w-full text-center text-sm text-blue-600 hover:text-blue-700"
+                className="w-full text-center py-2 bg-[#F8F7F0] text-gray-700 font-medium rounded-b-lg hover:bg-gray-100 transition-colors"
               >
                 View more
               </button>

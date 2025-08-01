@@ -5,11 +5,11 @@ This package contains service classes that handle business logic,
 including LLM operations, chat functionality, and data processing.
 """
 
-from .llm_service import llm_service, get_answer, get_suggestions, search_knowledge
+from .llm_service import llm_service, get_answer, get_suggestions, get_textbook_chunks
 
 __all__ = [
     'llm_service',
     'get_answer', 
     'get_suggestions',
-    'search_knowledge'
+    'get_textbook_chunks'
 ] 

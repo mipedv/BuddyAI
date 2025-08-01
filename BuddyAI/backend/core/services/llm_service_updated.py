@@ -273,18 +273,18 @@ ADVANCED COMPREHENSIVE EXPLANATION:"""
                     "source": "textbook_only"
                 }
             
-                return {
-                    "success": True,
-                    "answer": answer,
+            return {
+                "success": True,
+                "answer": answer,
                 "suggested_questions": self.generate_suggested_questions(answer),
                 "source": "textbook_only",
                 "chunks_used": len(chunks)
-                }
+            }
             
-            except Exception as e:
-                print(f"❌ Error generating textbook answer: {e}")
-                return {
-                    "success": False,
+        except Exception as e:
+            print(f"❌ Error generating textbook answer: {e}")
+            return {
+                "success": False,
                 "answer": "Error generating textbook explanation. Please try again.",
                 "suggested_questions": self._get_topic_specific_questions(message),
                 "source": "textbook_only"
@@ -435,7 +435,7 @@ Provide only the 3 questions, one per line:"""
                 while len(questions) < 3:
                     questions.append(fallbacks[len(questions)])
                 return questions[:3]
-            
+        
         except Exception as e:
             print(f"❌ Error generating questions: {e}")
             return self._get_fallback_questions()
