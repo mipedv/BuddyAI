@@ -1,7 +1,38 @@
 import React, { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Share2, Search, Video, RefreshCw, FileText, BookOpen, Edit3, ThumbsUp, ThumbsDown, Copy, MoreHorizontal } from 'lucide-react';
+import { Share2, Search, Video, RefreshCw, FileText, BookOpen, Edit3, ThumbsUp, ThumbsDown, Copy, MoreHorizontal, X } from 'lucide-react';
 import axios from 'axios';
+
+// Add CSS for textbook styling
+const textbookStyles = `
+  .textbook-page {
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  }
+  
+  .textbook-content p {
+    text-align: justify;
+    text-indent: 2rem;
+    margin-bottom: 1rem;
+    line-height: 1.8;
+  }
+  
+  .textbook-content h3 {
+    page-break-after: avoid;
+  }
+  
+  .textbook-content mark {
+    background: linear-gradient(120deg, #fef08a 0%, #fde047 100%);
+    padding: 2px 4px;
+    border-radius: 3px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  }
+  
+  @media print {
+    .textbook-page {
+      box-shadow: none;
+    }
+  }
+`;
 
 const ResponsePage: React.FC = () => {
   const location = useLocation();
@@ -21,6 +52,11 @@ const ResponsePage: React.FC = () => {
   const [rating, setRating] = useState<'up' | 'down' | null>(null);
   const [copied, setCopied] = useState(false);
   const [showMoreOptions, setShowMoreOptions] = useState(false);
+  
+  // Modal states
+  const [showFullChapterModal, setShowFullChapterModal] = useState(false);
+  const [showSummaryModal, setShowSummaryModal] = useState(false);
+  const [chapterContent, setChapterContent] = useState<string>('');
 
   const images = {
     main: '/media/main.png',
@@ -273,10 +309,122 @@ const ResponsePage: React.FC = () => {
     }
   };
 
+  // Handle View Full Chapter
+  const handleViewFullChapter = async () => {
+    if (!response) return;
+    
+    // Mapping of query keywords to image paths
+    const chapterImagesMap: Record<string, string[]> = {
+      'solar system_1': ['/media/textbook-chapters/solar system_1.png'],
+      'solar system_2': ['/media/textbook-chapters/solar system_2.png'],
+      'solar system': [
+        '/media/textbook-chapters/solar system_1.png', 
+        '/media/textbook-chapters/solar system_2.png'
+      ],
+      'solar': ['/media/textbook-chapters/solar system_1.png'],
+      'system': ['/media/textbook-chapters/solar system_2.png'],
+      'default': ['/media/textbook-chapters/solar system_1.png']
+    };
+
+    // Find the most appropriate images based on the query
+    const findChapterImages = (query: string): string[] => {
+      const lowerQuery = query.toLowerCase();
+      const matchedImages: Set<string> = new Set(); // Use Set to ensure unique images
+
+      for (const [keyword, imagePaths] of Object.entries(chapterImagesMap)) {
+        if (lowerQuery.includes(keyword)) {
+          imagePaths.forEach(path => matchedImages.add(path));
+        }
+      }
+
+      // If no matches, return default
+      return matchedImages.size > 0 
+        ? Array.from(matchedImages) 
+        : chapterImagesMap['default'];
+    };
+
+    const selectedChapterImages = findChapterImages(response.query || '');
+
+    // Prepare an object with image data for the modal
+    const chapterData = {
+      images: selectedChapterImages,
+      currentPage: 1,
+      totalPages: selectedChapterImages.length
+    };
+
+    // Set the chapter data as a stringified JSON to be parsed in the modal
+    setChapterContent(JSON.stringify(chapterData));
+    setShowFullChapterModal(true);
+  };
+
+  // Handle View Summary
+  const handleViewSummary = () => {
+    if (!response) return;
+    setShowSummaryModal(true);
+  };
+
+  // Generate summary from current answer
+  const generateSummary = (answer: string) => {
+    if (!answer) return ['No answer available to summarize.'];
+    
+    // Simple summary generation - extract key sentences
+    const sentences = answer.split(/[.!?]+/).filter(s => s.trim().length > 20);
+    
+    if (sentences.length <= 3) {
+      return sentences.map(s => s.trim()).filter(s => s.length > 0);
+    }
+    
+    // Take first, middle, and last sentences for a balanced summary
+    const summary = [
+      sentences[0]?.trim(),
+      sentences[Math.floor(sentences.length / 2)]?.trim(),
+      sentences[sentences.length - 1]?.trim()
+    ].filter(s => s && s.length > 0);
+    
+    return summary.length > 0 ? summary : ['Summary not available.'];
+  };
+
+  // Get chapter title from query
+  const getChapterTitle = (query: string) => {
+    if (!query) return 'Chapter Content';
+    
+    // Common science topics mapping
+    const topicMap: Record<string, string> = {
+      'solar system': 'The Solar System',
+      'sun': 'The Sun and Solar Energy',
+      'planets': 'Planets and Their Characteristics',
+      'earth': 'Planet Earth',
+      'moon': 'The Moon and Its Phases',
+      'stars': 'Stars and Constellations',
+      'gravity': 'Gravity and Forces',
+      'photosynthesis': 'Photosynthesis and Plant Life',
+      'water cycle': 'The Water Cycle',
+      'weather': 'Weather and Climate',
+      'animals': 'Animal Kingdom',
+      'ecosystem': 'Ecosystems and Environment',
+      'energy': 'Forms of Energy',
+      'matter': 'States of Matter',
+      'atom': 'Atomic Structure',
+      'cell': 'Cell Biology'
+    };
+    
+    const lowerQuery = query.toLowerCase();
+    for (const [key, title] of Object.entries(topicMap)) {
+      if (lowerQuery.includes(key)) {
+        return title;
+      }
+    }
+    
+    // Capitalize first letter of each word as fallback
+    return query.replace(/\b\w/g, l => l.toUpperCase());
+  };
+
   return (
-    <div className="flex h-screen bg-white font-sans">
+    <>
+    <style>{textbookStyles}</style>
+    <div className="flex h-screen bg-white font-sans overflow-hidden">
       {/* Sidebar */}
-      <div className="w-64 bg-[#f5f4ef] p-4 flex flex-col">
+      <div className="w-64 bg-[#F8F7F0] p-4 flex flex-col h-full fixed left-0 top-0 bottom-0 overflow-y-auto">
         <button className="bg-blue-500 text-white px-4 py-2 rounded-lg mb-4 flex items-center justify-center space-x-2">
           <span className="text-lg">➕</span>
           <span>New Chat</span>
@@ -306,7 +454,7 @@ const ResponsePage: React.FC = () => {
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 ml-64 overflow-y-auto">
         {/* Header */}
         <div className="flex justify-between items-center p-4 bg-[#f6f6f1]">
           <div className="flex items-center space-x-4">
@@ -369,12 +517,38 @@ const ResponsePage: React.FC = () => {
 
         {/* View Full Chapter and View Summary Buttons */}
         <div className="flex justify-end space-x-4 px-8 py-4 bg-[#f5f4ef]">
-          <button className="flex items-center space-x-2 px-4 py-2 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium group">
-            <FileText className="w-5 h-5 text-gray-500 group-hover:text-gray-700 transition-colors" />
+          <button 
+            onClick={handleViewFullChapter}
+            disabled={!response}
+            className={`flex items-center space-x-2 px-4 py-2 border border-gray-200 rounded-lg transition-all duration-200 text-sm font-medium group ${
+              !response 
+                ? 'text-gray-400 cursor-not-allowed bg-gray-50' 
+                : 'text-gray-600 hover:bg-gray-50 hover:border-gray-300'
+            }`}
+            title={!response ? "Ask a question first" : "View the full textbook chapter"}
+          >
+            <FileText className={`w-5 h-5 transition-colors ${
+              !response 
+                ? 'text-gray-400' 
+                : 'text-gray-500 group-hover:text-gray-700'
+            }`} />
             <span>View Full Chapter</span>
           </button>
-          <button className="flex items-center space-x-2 px-4 py-2 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium group">
-            <BookOpen className="w-5 h-5 text-gray-500 group-hover:text-gray-700 transition-colors" />
+          <button 
+            onClick={handleViewSummary}
+            disabled={!response}
+            className={`flex items-center space-x-2 px-4 py-2 border border-gray-200 rounded-lg transition-all duration-200 text-sm font-medium group ${
+              !response 
+                ? 'text-gray-400 cursor-not-allowed bg-gray-50' 
+                : 'text-gray-600 hover:bg-gray-50 hover:border-gray-300'
+            }`}
+            title={!response ? "Ask a question first" : "View a summary of the answer"}
+          >
+            <BookOpen className={`w-5 h-5 transition-colors ${
+              !response 
+                ? 'text-gray-400' 
+                : 'text-gray-500 group-hover:text-gray-700'
+            }`} />
             <span>View Summary</span>
           </button>
         </div>
@@ -696,6 +870,178 @@ const ResponsePage: React.FC = () => {
         </div>
       </div>
     </div>
+
+    {/* Full Chapter Modal */}
+    {showFullChapterModal && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-50 backdrop-blur-sm animate-fade-in">
+        <div 
+          id="full-chapter-modal" 
+          className="relative bg-white rounded-lg shadow-xl w-full max-w-5xl h-[85vh] flex flex-col animate-scale-in textbook-page-shadow"
+        >
+          {/* Modal Header */}
+          <div className="bg-gradient-to-r from-[#007bff] to-[#6f42c1] text-white p-8 rounded-t-lg flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <BookOpen size={32} className="text-white" />
+              <div className="flex flex-col">
+                <h2 className="text-2xl font-bold">Science Textbook</h2>
+                <p className="text-sm text-white/80 mt-1">Chapter: {getChapterTitle(response?.query || '')}</p>
+              </div>
+            </div>
+            <div className="flex items-center space-x-4">
+              {chapterContent ? (
+                (() => {
+                  try {
+                    const chapterData = JSON.parse(chapterContent);
+                    const { currentPage, totalPages } = chapterData;
+                    return (
+                      <span className="text-lg font-medium text-white/90">
+                        Page {currentPage} of {totalPages}
+                      </span>
+                    );
+                  } catch (error) {
+                    return <span className="text-lg font-medium text-white/90">Page 1 of 1</span>;
+                  }
+                })()
+              ) : (
+                <span className="text-lg font-medium text-white/90">Page 1 of 1</span>
+              )}
+              <button 
+                onClick={() => setShowFullChapterModal(false)} 
+                className="p-3 rounded-full hover:bg-white/20 transition-colors"
+              >
+                <X size={24} />
+              </button>
+            </div>
+          </div>
+          
+          {/* Modal Body */}
+          <div className="flex-1 p-8 overflow-y-auto text-gray-800 text-base leading-relaxed bg-white relative z-0">
+            <div className="textbook-page-bg"></div>
+            {/* chapterLoading state removed */}
+            {chapterContent ? (
+              (() => {
+                try {
+                  // Parse the chapter data
+                  const chapterData = JSON.parse(chapterContent);
+                  const { images, currentPage, totalPages } = chapterData;
+
+                  return (
+                    <div className="textbook-content flex justify-center items-center h-full relative">
+                      {/* Previous Page Button */}
+                      {currentPage > 1 && (
+                        <button 
+                          onClick={() => {
+                            const updatedData = {
+                              ...chapterData,
+                              currentPage: currentPage - 1
+                            };
+                            setChapterContent(JSON.stringify(updatedData));
+                          }}
+                          className="absolute left-0 top-1/2 transform -translate-y-1/2 bg-white/50 hover:bg-white/70 p-2 rounded-full shadow-md z-10"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M15 18l-6-6 6-6"/>
+                          </svg>
+                        </button>
+                      )}
+
+                      {/* Next Page Button */}
+                      {currentPage < totalPages && (
+                        <button 
+                          onClick={() => {
+                            const updatedData = {
+                              ...chapterData,
+                              currentPage: currentPage + 1
+                            };
+                            setChapterContent(JSON.stringify(updatedData));
+                          }}
+                          className="absolute right-0 top-1/2 transform -translate-y-1/2 bg-white/50 hover:bg-white/70 p-2 rounded-full shadow-md z-10"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M9 18l6-6-6-6"/>
+                          </svg>
+                        </button>
+                      )}
+
+                      {/* Current Page Image */}
+                      <img 
+                        src={images[currentPage - 1]} 
+                        alt={`Chapter Content Page ${currentPage}`} 
+                        className="max-w-full max-h-[80vh] object-contain shadow-lg rounded-lg"
+                      />
+                    </div>
+                  );
+                } catch (error) {
+                  console.error('Error parsing chapter content:', error);
+                  return (
+                    <div className="flex flex-col items-center justify-center h-full">
+                      <div className="animate-spin rounded-full h-12 w-12 border-[4px] border-gray-300 border-t-blue-600"></div>
+                      <p className="mt-4 text-gray-600 text-lg">Error loading chapter content</p>
+                    </div>
+                  );
+                }
+              })()
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full">
+                <div className="animate-spin rounded-full h-12 w-12 border-[4px] border-gray-300 border-t-blue-600"></div>
+                <p className="mt-4 text-gray-600 text-lg">Loading chapter content...</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* Summary Modal */}
+    {showSummaryModal && (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-xl max-w-2xl w-full shadow-2xl">
+          {/* Modal Header */}
+          <div className="flex items-center justify-between p-6 border-b border-gray-200">
+            <div className="flex items-center gap-3">
+              <BookOpen className="w-6 h-6 text-gray-700" />
+              <h2 className="text-xl font-semibold text-gray-800">Answer Summary</h2>
+            </div>
+            <button
+              onClick={() => setShowSummaryModal(false)}
+              className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+            >
+              <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          
+          {/* Modal Content */}
+          <div className="p-6">
+            <div className="bg-[#F8F7F0] rounded-lg p-4 mb-4">
+              <h3 className="font-medium text-gray-800 mb-3 flex items-center gap-2">
+                <span className="w-2 h-2 bg-gray-600 rounded-full"></span>
+                Key Takeaways
+              </h3>
+              <ul className="space-y-2">
+                {generateSummary(response?.answer || '').map((point, index) => (
+                  <li key={index} className="flex items-start gap-3 text-gray-700">
+                    <span className="w-1.5 h-1.5 bg-gray-500 rounded-full mt-2 flex-shrink-0"></span>
+                    <span className="leading-relaxed">{point}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            
+            <div className="flex justify-end">
+              <button
+                onClick={() => setShowSummaryModal(false)}
+                className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 };
 
