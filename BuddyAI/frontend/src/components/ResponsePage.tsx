@@ -149,6 +149,39 @@ const ResponsePage: React.FC = () => {
     }
   };
 
+  // Function to handle text selection
+  const handleTextSelection = (event: React.MouseEvent | React.TouchEvent) => {
+    const selection = window.getSelection();
+    if (!selection || selection.toString().trim() === '') return;
+
+    // Check if selection is from the answer text
+    const target = event.target as HTMLElement;
+    const isFromAnswer = target.closest('.answer-text') !== null;
+
+    if (!isFromAnswer) return;
+
+    const selectedText = selection.toString().trim();
+    const inputElement = document.querySelector('input[placeholder="Ask follow-up"]') as HTMLInputElement;
+    
+    if (inputElement) {
+      // If input already has content with "Explain this:", append with comma
+      if (followUpQuery.includes('Explain this:')) {
+        setFollowUpQuery(prev => `${prev}, ${selectedText}`);
+      } else {
+        // Start fresh with "Explain this:"
+        setFollowUpQuery(`Explain this: ${selectedText}`);
+      }
+
+      // Focus the input
+      inputElement.focus();
+      
+      // Clear the selection after a short delay
+      setTimeout(() => {
+        window.getSelection()?.removeAllRanges();
+      }, 1000);
+    }
+  };
+
   // Function to handle voice mode
   const handleVoiceMode = () => {
     setIsVoiceMode(!isVoiceMode);
@@ -161,24 +194,80 @@ const ResponsePage: React.FC = () => {
 
     try {
       setIsLoading(true);
-      const apiResponse = await axios.get(`http://localhost:8000/api/core/get-answer/`, {
-        params: {
+
+      // Extract individual queries
+      let queries = followUpQuery
+        .replace('Explain this:', '')
+        .split(',')
+        .map(q => q.trim())
+        .filter(q => q.length > 0);
+
+      // If there's only one query, handle it normally
+      if (queries.length === 1) {
+        const apiResponse = await axios.get(`http://localhost:8000/api/core/get-answer/`, {
+          params: {
+            query: followUpQuery,
+            level: getLevelForBackend(explanationType)
+          }
+        });
+
+        // Navigate to new response page with follow-up query
+        navigate('/response', {
+          state: { response: apiResponse.data }
+        });
+
+        // Update URL with query parameters
+        window.history.pushState(
+          null, 
+          '', 
+          `/response?query=${encodeURIComponent(followUpQuery)}&level=${getLevelForBackend(explanationType)}`
+        );
+      } else {
+        // For multiple queries, get answers for each one
+        const answers = await Promise.all(
+          queries.map(query => 
+            axios.get(`http://localhost:8000/api/core/get-answer/`, {
+              params: {
+                query,
+                level: getLevelForBackend(explanationType)
+              }
+            })
+          )
+        );
+
+        // Combine all answers
+        const combinedAnswer = answers.map((response, index) => 
+          `About "${queries[index]}":\n${response.data.answer}\n\n`
+        ).join('');
+
+        // Combine suggested questions
+        const combinedSuggestions = answers.reduce<string[]>((acc, response) => {
+          if (response.data.suggested_questions) {
+            acc.push(...response.data.suggested_questions);
+          }
+          return acc;
+        }, []).slice(0, 3); // Keep only top 3 suggestions
+
+        // Create combined response
+        const combinedResponse = {
           query: followUpQuery,
+          answer: combinedAnswer,
+          suggested_questions: combinedSuggestions,
           level: getLevelForBackend(explanationType)
-        }
-      });
+        };
 
-      // Navigate to new response page with follow-up query
-      navigate('/response', {
-        state: { response: apiResponse.data }
-      });
+        // Navigate with combined response
+        navigate('/response', {
+          state: { response: combinedResponse }
+        });
 
-      // Update URL with query parameters
-      window.history.pushState(
-        null, 
-        '', 
-        `/response?query=${encodeURIComponent(followUpQuery)}&level=${getLevelForBackend(explanationType)}`
-      );
+        // Update URL
+        window.history.pushState(
+          null, 
+          '', 
+          `/response?query=${encodeURIComponent(followUpQuery)}&level=${getLevelForBackend(explanationType)}`
+        );
+      }
 
       // Reset follow-up query
       setFollowUpQuery('');
@@ -421,7 +510,19 @@ const ResponsePage: React.FC = () => {
 
   return (
     <>
-    <style>{textbookStyles}</style>
+    <style>
+      {`
+        ${textbookStyles}
+        ::selection {
+          background-color: #fb923c;
+          color: white;
+        }
+        ::-moz-selection {
+          background-color: #fb923c;
+          color: white;
+        }
+      `}
+    </style>
     <div className="flex h-screen bg-white font-sans overflow-hidden">
       {/* Sidebar */}
       <div className="w-64 bg-[#F8F7F0] p-4 flex flex-col h-full fixed left-0 top-0 bottom-0 overflow-y-auto">
@@ -647,7 +748,12 @@ const ResponsePage: React.FC = () => {
 
             {/* Answer Section */}
             <div className="prose max-w-none mb-8">
-              <div className={`text-base leading-7 text-gray-700 ${isLoading ? 'opacity-50' : ''}`}>
+              <div 
+                className="answer-text text-base leading-7 text-gray-700"
+                onMouseUp={handleTextSelection}
+                onTouchEnd={handleTextSelection}
+                style={{ userSelect: 'text' }}
+              >
                 {isLoading ? (
                   <div className="flex items-center gap-3">
                     <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
@@ -759,14 +865,17 @@ const ResponsePage: React.FC = () => {
                     <span>Listening... Speak now</span>
                   </div>
                 ) : (
-                  <input
-                    type="text"
-                    value={followUpQuery}
-                    onChange={(e) => setFollowUpQuery(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleFollowUpSubmit()}
-                    placeholder="Ask follow-up"
-                    className="w-full px-4 py-3 pr-12 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+                  <div className="relative">
+                    {/* Input field */}
+                    <input
+                      type="text"
+                      value={followUpQuery}
+                      onChange={(e) => setFollowUpQuery(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleFollowUpSubmit()}
+                      placeholder="Ask follow-up"
+                      className="w-full px-4 py-3 pr-12 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
                 )}
                 <div className="absolute right-2 top-1/2 transform -translate-y-1/2 flex items-center space-x-2">
                   {/* Mic Button */}
