@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Share2, Search, Video, RefreshCw, FileText, BookOpen, Edit3, ThumbsUp, ThumbsDown, Copy, MoreHorizontal, X } from 'lucide-react';
+import AskBuddyAIButton from './AskBuddyAIButton';
 import axios from 'axios';
 
 // Add CSS for textbook styling
@@ -35,24 +36,33 @@ const textbookStyles = `
 `;
 
 const ResponsePage: React.FC = () => {
+  // Router hooks
   const location = useLocation();
   const navigate = useNavigate();
+
+  // Core states
   const [response, setResponse] = useState<any>(null);
-  const [followUpQuery, setFollowUpQuery] = useState('');
   const [explanationType, setExplanationType] = useState('Textbook Explanation');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Add state for voice mode
-  const [isVoiceMode, setIsVoiceMode] = useState(false);
-  
-  // Add states for new features
+  // Input and query states
+  const [followUpQuery, setFollowUpQuery] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [editedQuery, setEditedQuery] = useState('');
+
+  // Feature states
+  const [isVoiceMode, setIsVoiceMode] = useState(false);
   const [rating, setRating] = useState<'up' | 'down' | null>(null);
   const [copied, setCopied] = useState(false);
   const [showMoreOptions, setShowMoreOptions] = useState(false);
-  
+
+  // Simple text selection states
+  const [showHighlightPopup, setShowHighlightPopup] = useState(false);
+  const [highlightPopupPosition, setHighlightPopupPosition] = useState({ x: 0, y: 0 });
+  const [selectedText, setSelectedText] = useState('');
+  const [isInputExpanded, setIsInputExpanded] = useState(false);
+
   // Modal states
   const [showFullChapterModal, setShowFullChapterModal] = useState(false);
   const [showSummaryModal, setShowSummaryModal] = useState(false);
@@ -63,7 +73,8 @@ const ResponsePage: React.FC = () => {
     thumbnails: ['/media/thumbnail1.png', '/media/thumbnail2.png']
   };
 
-  React.useEffect(() => {
+  // Initialize response and explanation type from URL
+  useEffect(() => {
     if (location.state?.response) {
       setResponse(location.state.response);
       const levelParam = new URLSearchParams(location.search).get('level');
@@ -87,19 +98,49 @@ const ResponsePage: React.FC = () => {
     }
   }, [location, navigate]);
 
+  // Handle scroll to hide popup - handled by the useHighlightPopup hook
+
   // Close more options dropdown when clicking outside
-  React.useEffect(() => {
-    const handleClickOutside = () => {
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      
+      // Handle more options dropdown
       if (showMoreOptions) {
         setShowMoreOptions(false);
+      }
+      
+      // Handle highlight popup
+      if (showHighlightPopup && !target.closest('.highlight-popup')) {
+        setShowHighlightPopup(false);
+      }
+    };
+
+    const handleScroll = () => {
+      if (showHighlightPopup) {
+        setShowHighlightPopup(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowHighlightPopup(false);
+        if (isInputExpanded) {
+          setIsInputExpanded(false);
+        }
       }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('scroll', handleScroll, true);
+    document.addEventListener('keydown', handleKeyDown);
+    
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('scroll', handleScroll, true);
+      document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [showMoreOptions]);
+  }, [showMoreOptions, showHighlightPopup, isInputExpanded]);
 
   if (!response) {
     return (
@@ -110,6 +151,97 @@ const ResponsePage: React.FC = () => {
   }
 
   const displayQuery = response.query ? response.query.charAt(0).toUpperCase() + response.query.slice(1) : 'Unknown Topic';
+
+  // Function to handle new query submission from highlight-to-ask
+  const handleNewQuery = async (query: string) => {
+    try {
+      setIsLoading(true);
+      const apiResponse = await axios.get(`http://localhost:8000/api/core/get-answer/`, {
+        params: {
+          query,
+          level: getLevelForBackend(explanationType)
+        }
+      });
+
+      // Navigate to new response page
+      navigate('/response', {
+        state: { response: apiResponse.data }
+      });
+
+      // Update URL with query parameters
+      window.history.pushState(
+        null, 
+        '', 
+        `/response?query=${encodeURIComponent(query)}&level=${getLevelForBackend(explanationType)}`
+      );
+    } catch (err: any) {
+      console.error('Error submitting new query:', err);
+      setError(err.response?.data?.error || 'Failed to submit query. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Simple text selection handlers
+  const handleTextSelection = (event: React.MouseEvent | React.TouchEvent) => {
+    const selection = window.getSelection();
+    if (!selection || selection.toString().trim() === '') {
+      setShowHighlightPopup(false);
+      return;
+    }
+
+    // Check if selection is from the lesson content
+    const target = event.target as HTMLElement;
+    const isFromLessonContent = target.closest('.lesson-content, .answer-text') !== null;
+    const isInsideInteractiveElement = target.closest('button, input, textarea, select, a') !== null;
+
+    if (!isFromLessonContent || isInsideInteractiveElement) {
+      setShowHighlightPopup(false);
+      return;
+    }
+
+    const text = selection.toString().trim();
+    setSelectedText(text);
+
+    // Get selection coordinates
+    const range = selection.getRangeAt(0);
+    const rect = range.getBoundingClientRect();
+
+    // Position popup above the selection
+    const x = Math.max(10, Math.min(
+      window.innerWidth - 150,
+      rect.left + (rect.width / 2) - 75
+    ));
+    const y = Math.max(10, rect.top - 50);
+
+    setHighlightPopupPosition({ x, y });
+    setShowHighlightPopup(true);
+  };
+
+  const handlePopupClick = () => {
+    setShowHighlightPopup(false);
+    
+    // Show the selected text in bubble format and clear the input
+    if (selectedText) {
+      setFollowUpQuery(''); // Clear the input field
+      setIsInputExpanded(true);
+      
+      // Focus the existing input field
+      setTimeout(() => {
+        const inputElement = document.querySelector('input[placeholder="Ask anything"], input[placeholder="Ask follow-up"]') as HTMLInputElement;
+        if (inputElement) {
+          inputElement.focus();
+        }
+      }, 100);
+    }
+    
+    window.getSelection()?.removeAllRanges();
+  };
+
+  const handleCloseExpandedInput = () => {
+    setIsInputExpanded(false);
+    setFollowUpQuery('');
+  };
 
   // Function to handle explanation type change
   const handleExplanationTypeChange = async (newExplanationType: string) => {
@@ -149,38 +281,7 @@ const ResponsePage: React.FC = () => {
     }
   };
 
-  // Function to handle text selection
-  const handleTextSelection = (event: React.MouseEvent | React.TouchEvent) => {
-    const selection = window.getSelection();
-    if (!selection || selection.toString().trim() === '') return;
 
-    // Check if selection is from the answer text
-    const target = event.target as HTMLElement;
-    const isFromAnswer = target.closest('.answer-text') !== null;
-
-    if (!isFromAnswer) return;
-
-    const selectedText = selection.toString().trim();
-    const inputElement = document.querySelector('input[placeholder="Ask follow-up"]') as HTMLInputElement;
-    
-    if (inputElement) {
-      // If input already has content with "Explain this:", append with comma
-      if (followUpQuery.includes('Explain this:')) {
-        setFollowUpQuery(prev => `${prev}, ${selectedText}`);
-      } else {
-        // Start fresh with "Explain this:"
-        setFollowUpQuery(`Explain this: ${selectedText}`);
-      }
-
-      // Focus the input
-      inputElement.focus();
-      
-      // Clear the selection after a short delay
-      setTimeout(() => {
-        window.getSelection()?.removeAllRanges();
-      }, 1000);
-    }
-  };
 
   // Function to handle voice mode
   const handleVoiceMode = () => {
@@ -190,87 +291,39 @@ const ResponsePage: React.FC = () => {
 
   // Function to handle follow-up query submission
   const handleFollowUpSubmit = async () => {
-    if (!followUpQuery.trim()) return;
+    // Combine selected text and user input
+    const queryToSubmit = isInputExpanded && selectedText 
+      ? `${selectedText}${followUpQuery.trim() ? ' - ' + followUpQuery.trim() : ''}` 
+      : followUpQuery.trim();
+    
+    if (!queryToSubmit) return;
 
     try {
       setIsLoading(true);
 
-      // Extract individual queries
-      let queries = followUpQuery
-        .replace('Explain this:', '')
-        .split(',')
-        .map(q => q.trim())
-        .filter(q => q.length > 0);
-
-      // If there's only one query, handle it normally
-      if (queries.length === 1) {
-        const apiResponse = await axios.get(`http://localhost:8000/api/core/get-answer/`, {
-          params: {
-            query: followUpQuery,
-            level: getLevelForBackend(explanationType)
-          }
-        });
+      // Use the combined query for submission
+      const apiResponse = await axios.get(`http://localhost:8000/api/core/get-answer/`, {
+        params: {
+          query: queryToSubmit,
+          level: getLevelForBackend(explanationType)
+        }
+      });
 
         // Navigate to new response page with follow-up query
         navigate('/response', {
           state: { response: apiResponse.data }
         });
 
-        // Update URL with query parameters
-        window.history.pushState(
-          null, 
-          '', 
-          `/response?query=${encodeURIComponent(followUpQuery)}&level=${getLevelForBackend(explanationType)}`
-        );
-      } else {
-        // For multiple queries, get answers for each one
-        const answers = await Promise.all(
-          queries.map(query => 
-            axios.get(`http://localhost:8000/api/core/get-answer/`, {
-              params: {
-                query,
-                level: getLevelForBackend(explanationType)
-              }
-            })
-          )
-        );
+      // Update URL with query parameters
+      window.history.pushState(
+        null, 
+        '', 
+        `/response?query=${encodeURIComponent(queryToSubmit)}&level=${getLevelForBackend(explanationType)}`
+      );
 
-        // Combine all answers
-        const combinedAnswer = answers.map((response, index) => 
-          `About "${queries[index]}":\n${response.data.answer}\n\n`
-        ).join('');
-
-        // Combine suggested questions
-        const combinedSuggestions = answers.reduce<string[]>((acc, response) => {
-          if (response.data.suggested_questions) {
-            acc.push(...response.data.suggested_questions);
-          }
-          return acc;
-        }, []).slice(0, 3); // Keep only top 3 suggestions
-
-        // Create combined response
-        const combinedResponse = {
-          query: followUpQuery,
-          answer: combinedAnswer,
-          suggested_questions: combinedSuggestions,
-          level: getLevelForBackend(explanationType)
-        };
-
-        // Navigate with combined response
-        navigate('/response', {
-          state: { response: combinedResponse }
-        });
-
-        // Update URL
-        window.history.pushState(
-          null, 
-          '', 
-          `/response?query=${encodeURIComponent(followUpQuery)}&level=${getLevelForBackend(explanationType)}`
-        );
-      }
-
-      // Reset follow-up query
+      // Reset follow-up query and expanded state
       setFollowUpQuery('');
+      setIsInputExpanded(false);
     } catch (err: any) {
       console.error('Error submitting follow-up query:', err);
       setError(err.response?.data?.error || 'Failed to submit follow-up query. Please try again.');
@@ -507,6 +560,8 @@ const ResponsePage: React.FC = () => {
     // Capitalize first letter of each word as fallback
     return query.replace(/\b\w/g, l => l.toUpperCase());
   };
+
+
 
   return (
     <>
@@ -749,7 +804,7 @@ const ResponsePage: React.FC = () => {
             {/* Answer Section */}
             <div className="prose max-w-none mb-8">
               <div 
-                className="answer-text text-base leading-7 text-gray-700"
+                className="lesson-content answer-text text-base leading-7 text-gray-700"
                 onMouseUp={handleTextSelection}
                 onTouchEnd={handleTextSelection}
                 style={{ userSelect: 'text' }}
@@ -866,18 +921,65 @@ const ResponsePage: React.FC = () => {
                   </div>
                 ) : (
                   <div className="relative">
-                    {/* Input field */}
-                    <input
-                      type="text"
-                      value={followUpQuery}
-                      onChange={(e) => setFollowUpQuery(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleFollowUpSubmit()}
-                      placeholder="Ask follow-up"
-                      className="w-full px-4 py-3 pr-12 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
+                    {isInputExpanded ? (
+                      /* Expanded input with selected text inside */
+                      <div className="w-full border border-gray-200 rounded-xl bg-white focus-within:ring-2 focus-within:ring-blue-500 p-3 pr-20 min-h-[80px]">
+                        {/* Close button */}
+                        <button
+                          onClick={handleCloseExpandedInput}
+                          className="absolute top-2 right-2 p-1 hover:bg-gray-100 rounded-full transition-colors z-10"
+                          title="Close"
+                        >
+                          <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                        
+                        {/* Selected text bubble with return arrow */}
+                        <div className="flex items-center space-x-2 mb-3 mr-16">
+                          {/* Return/Enter arrow */}
+                          <div className="flex-shrink-0">
+                            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="text-gray-400">
+                              <path 
+                                d="M13 10L9 6M13 10L9 14M13 10H3V4" 
+                                stroke="currentColor" 
+                                strokeWidth="1.5" 
+                                strokeLinecap="round" 
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                          </div>
+                          <div className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded-md flex-1 min-w-0">
+                            <span className="text-sm truncate block">
+                              {selectedText.length > 80 ? `${selectedText.substring(0, 80)}...` : selectedText}
+                            </span>
+                          </div>
+                        </div>
+                        
+                        {/* Input field inside */}
+                        <input
+                          type="text"
+                          value={followUpQuery}
+                          onChange={(e) => setFollowUpQuery(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && handleFollowUpSubmit()}
+                          placeholder="Ask anything"
+                          className="w-full border-none outline-none text-gray-700 placeholder-gray-400 mr-16"
+                        />
+                      </div>
+                    ) : (
+                      /* Normal input field */
+                      <input
+                        type="text"
+                        value={followUpQuery}
+                        onChange={(e) => setFollowUpQuery(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleFollowUpSubmit()}
+                        placeholder="Ask follow-up"
+                        className="w-full px-4 py-3 pr-12 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                      />
+                    )}
                   </div>
                 )}
-                <div className="absolute right-2 top-1/2 transform -translate-y-1/2 flex items-center space-x-2">
+                <div className={`absolute right-2 flex items-center space-x-2 ${isInputExpanded ? 'bottom-2' : 'top-1/2 transform -translate-y-1/2'}`}>
                   {/* Mic Button */}
                   <button 
                     onClick={() => console.log('Microphone clicked')}
@@ -1132,7 +1234,14 @@ const ResponsePage: React.FC = () => {
                 {generateSummary(response?.answer || '').map((point, index) => (
                   <li key={index} className="flex items-start gap-3 text-gray-700">
                     <span className="w-1.5 h-1.5 bg-gray-500 rounded-full mt-2 flex-shrink-0"></span>
-                    <span className="leading-relaxed">{point}</span>
+                    <span 
+                      className="leading-relaxed lesson-content"
+                      onMouseUp={handleTextSelection}
+                      onTouchEnd={handleTextSelection}
+                      style={{ userSelect: 'text' }}
+                    >
+                      {point}
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -1150,6 +1259,12 @@ const ResponsePage: React.FC = () => {
         </div>
       </div>
     )}
+      {/* Highlight-to-Ask Components */}
+      <AskBuddyAIButton
+        position={highlightPopupPosition}
+        onAsk={handlePopupClick}
+        visible={showHighlightPopup}
+      />
     </>
   );
 };
