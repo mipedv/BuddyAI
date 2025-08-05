@@ -6,6 +6,7 @@ import HomePage from './components/HomePage';
 import ChapterDetailPage from './components/ChapterDetailPage';
 import ResponsePage from './components/ResponsePage';
 import MediaGalleryPage from './components/MediaGalleryPage';
+import TestSelection from './components/TestSelection';
 
 const App: React.FC = () => {
   return (
@@ -17,6 +18,7 @@ const App: React.FC = () => {
         <Route path="/chapter" element={<ChapterDetailPage />} />
         <Route path="/response" element={<ResponsePage />} />
         <Route path="/media-gallery" element={<MediaGalleryPage />} />
+        <Route path="/test-selection" element={<TestSelection />} />
         <Route path="/" element={<Navigate to="/login" replace />} />
       </Routes>
     </Router>

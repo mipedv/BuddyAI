@@ -42,9 +42,9 @@ const HomePage: React.FC = () => {
   const [selectedChapter, setSelectedChapter] = useState('Select Chapter');
 
   return (
-    <div className="flex h-screen bg-white">
+    <div className="flex h-screen bg-white overflow-hidden">
       <Sidebar />
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 ml-64 overflow-y-auto">
         <MainContent 
           selectedSubject={selectedSubject}
           setSelectedSubject={setSelectedSubject}

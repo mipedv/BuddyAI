@@ -10,7 +10,7 @@ const menuItems = [
 
 const Sidebar: React.FC = () => {
   return (
-    <div className="w-64 bg-[#f5f4ef] p-4 flex flex-col h-full">
+    <div className="w-64 bg-[#F8F7F0] p-4 flex flex-col h-full fixed left-0 top-0 bottom-0 overflow-y-auto">
       {/* Logo or Branding */}
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-gray-800">

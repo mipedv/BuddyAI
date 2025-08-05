@@ -23,6 +23,7 @@ const MediaGalleryPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'images' | 'videos'>('images');
+  const [hoveredItem, setHoveredItem] = useState<number | null>(null);
 
   // Get query from URL params
   const searchParams = new URLSearchParams(location.search);
@@ -67,33 +68,42 @@ const MediaGalleryPage: React.FC = () => {
   };
 
   const ImageGrid = ({ items }: { items: MediaItem[] }) => (
-    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
       {items.map((item, index) => (
         <div
           key={index}
-          className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow cursor-pointer"
+          className="group bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden cursor-pointer transform hover:-translate-y-1"
           onClick={() => openExternalLink(item.link)}
+          onMouseEnter={() => setHoveredItem(index)}
+          onMouseLeave={() => setHoveredItem(null)}
         >
-          <div className="aspect-square bg-gray-100 relative overflow-hidden">
+          <div className="aspect-square bg-gray-50 relative overflow-hidden">
             <img
               src={item.thumbnail || item.link}
               alt={item.title}
-              className="w-full h-full object-cover"
+              className="w-full h-full object-cover transform transition-transform duration-500 group-hover:scale-105"
               onError={(e) => {
                 const target = e.target as HTMLImageElement;
                 target.src = '/media/main.png'; // Fallback image
               }}
             />
-            <div className="absolute inset-0 bg-black bg-opacity-0 hover:bg-opacity-10 transition-opacity flex items-center justify-center">
-              <ExternalLink className="text-white opacity-0 hover:opacity-100 transition-opacity" size={20} />
+            <div className={`absolute inset-0 bg-black transition-opacity duration-300 ${
+              hoveredItem === index ? 'bg-opacity-30' : 'bg-opacity-0'
+            } flex items-center justify-center`}>
+              <ExternalLink 
+                className={`text-white transform transition-all duration-300 ${
+                  hoveredItem === index ? 'scale-100 opacity-100' : 'scale-90 opacity-0'
+                }`} 
+                size={24} 
+              />
             </div>
           </div>
-          <div className="p-3">
-            <h3 className="text-sm font-medium text-gray-900 truncate" title={item.title}>
+          <div className="p-4">
+            <h3 className="text-sm font-semibold text-gray-800 truncate group-hover:text-gray-900" title={item.title}>
               {item.title}
             </h3>
             {item.source && (
-              <p className="text-xs text-gray-500 mt-1">{item.source}</p>
+              <p className="text-xs text-gray-500 mt-1.5 group-hover:text-gray-600">{item.source}</p>
             )}
           </div>
         </div>
@@ -102,43 +112,49 @@ const MediaGalleryPage: React.FC = () => {
   );
 
   const VideoGrid = ({ items }: { items: MediaItem[] }) => (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
       {items.map((item, index) => (
         <div
           key={index}
-          className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow cursor-pointer"
+          className="group bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden cursor-pointer transform hover:-translate-y-1"
           onClick={() => openExternalLink(item.link)}
+          onMouseEnter={() => setHoveredItem(index)}
+          onMouseLeave={() => setHoveredItem(null)}
         >
-          <div className="aspect-video bg-gray-100 relative overflow-hidden">
+          <div className="aspect-video bg-gray-50 relative overflow-hidden">
             <img
               src={item.thumbnail}
               alt={item.title}
-              className="w-full h-full object-cover"
+              className="w-full h-full object-cover transform transition-transform duration-500 group-hover:scale-105"
               onError={(e) => {
                 const target = e.target as HTMLImageElement;
                 target.src = '/media/thumbnail1.png'; // Fallback thumbnail
               }}
             />
-            <div className="absolute inset-0 bg-black bg-opacity-20 flex items-center justify-center">
-              <div className="bg-red-600 rounded-full p-2">
-                <Play className="text-white" size={24} fill="white" />
+            <div className={`absolute inset-0 flex items-center justify-center transition-all duration-300 ${
+              hoveredItem === index ? 'bg-black bg-opacity-40' : 'bg-black bg-opacity-20'
+            }`}>
+              <div className={`bg-gray-800 rounded-full p-3 transform transition-all duration-300 ${
+                hoveredItem === index ? 'scale-110 bg-opacity-90' : 'scale-100 bg-opacity-75'
+              }`}>
+                <Play className="text-white" size={28} fill="white" />
               </div>
             </div>
             {item.duration && (
-              <div className="absolute bottom-2 right-2 bg-black bg-opacity-75 text-white text-xs px-2 py-1 rounded">
+              <div className="absolute bottom-3 right-3 bg-black bg-opacity-75 text-white text-xs px-2.5 py-1.5 rounded-md">
                 {item.duration}
               </div>
             )}
           </div>
-          <div className="p-3">
-            <h3 className="text-sm font-medium text-gray-900 line-clamp-2" title={item.title}>
+          <div className="p-4">
+            <h3 className="text-sm font-semibold text-gray-800 line-clamp-2 group-hover:text-gray-900" title={item.title}>
               {item.title}
             </h3>
             {item.description && (
-              <p className="text-xs text-gray-600 mt-1 line-clamp-2">{item.description}</p>
+              <p className="text-xs text-gray-600 mt-2 line-clamp-2 group-hover:text-gray-700">{item.description}</p>
             )}
             {item.source && (
-              <p className="text-xs text-gray-500 mt-1">{item.source}</p>
+              <p className="text-xs text-gray-500 mt-2 group-hover:text-gray-600">{item.source}</p>
             )}
           </div>
         </div>
@@ -147,25 +163,32 @@ const MediaGalleryPage: React.FC = () => {
   );
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#F8F7F0]">
       {/* Header */}
-      <div className="bg-white shadow-sm border-b">
+      <div className="bg-gradient-to-r from-[#2C3E50] to-[#3498DB] text-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between py-4">
-            <div className="flex items-center space-x-4">
+          <div className="flex items-center justify-between py-8">
+            <div className="flex items-center space-x-8">
               <button
                 onClick={handleBack}
-                className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                className="p-3 hover:bg-white/10 rounded-full transition-all duration-300 hover:scale-105 active:scale-95 backdrop-blur-sm"
+                aria-label="Go back"
               >
-                <ArrowLeft size={20} />
+                <ArrowLeft size={24} className="text-white" />
               </button>
-              <div>
-                <h1 className="text-xl font-semibold text-gray-900">
+              <div className="relative">
+                <h1 className="text-3xl font-bold text-white tracking-wide">
                   Media Gallery
                 </h1>
-                <p className="text-sm text-gray-600">
-                  Showing results for "{query}"
-                </p>
+                <div className="flex items-center mt-2">
+                  <p className="text-base text-white/80">
+                    Showing results for 
+                  </p>
+                  <div className="ml-2 px-3 py-1 bg-white/10 rounded-full backdrop-blur-sm">
+                    <span className="font-medium text-white">"{query}"</span>
+                  </div>
+                </div>
+                <div className="absolute -bottom-6 left-0 right-0 h-1 bg-gradient-to-r from-white/0 via-white/20 to-white/0"></div>
               </div>
             </div>
           </div>
@@ -173,34 +196,62 @@ const MediaGalleryPage: React.FC = () => {
       </div>
 
       {/* Tab Navigation */}
-      <div className="bg-white border-b">
+      <div className="bg-gradient-to-r from-[#F8F7F0] to-[#F0F0F0] border-b border-gray-200/50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex space-x-8">
+          <div className="flex space-x-10 relative">
             <button
               onClick={() => setActiveTab('images')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+              className={`py-5 px-2 group relative font-medium text-base transition-all duration-300 ${
                 activeTab === 'images'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  ? 'text-gray-900'
+                  : 'text-gray-600 hover:text-gray-800'
               }`}
             >
-              <div className="flex items-center space-x-2">
-                <Search size={16} />
+              <div className="flex items-center space-x-3">
+                <Search 
+                  size={18} 
+                  className={`transition-colors duration-300 ${
+                    activeTab === 'images' 
+                      ? 'text-gray-900' 
+                      : 'text-gray-500 group-hover:text-gray-700'
+                  }`} 
+                />
                 <span>Images ({images.length})</span>
               </div>
+              <div 
+                className={`absolute bottom-0 left-0 right-0 h-1 transform origin-center transition-all duration-300 ${
+                  activeTab === 'images'
+                    ? 'scale-x-100 bg-gray-900'
+                    : 'scale-x-0 bg-gray-700 group-hover:scale-x-50'
+                }`}
+              ></div>
             </button>
             <button
               onClick={() => setActiveTab('videos')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+              className={`py-5 px-2 group relative font-medium text-base transition-all duration-300 ${
                 activeTab === 'videos'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  ? 'text-gray-900'
+                  : 'text-gray-600 hover:text-gray-800'
               }`}
             >
-              <div className="flex items-center space-x-2">
-                <Video size={16} />
+              <div className="flex items-center space-x-3">
+                <Video 
+                  size={18} 
+                  className={`transition-colors duration-300 ${
+                    activeTab === 'videos' 
+                      ? 'text-gray-900' 
+                      : 'text-gray-500 group-hover:text-gray-700'
+                  }`} 
+                />
                 <span>Videos ({videos.length})</span>
               </div>
+              <div 
+                className={`absolute bottom-0 left-0 right-0 h-1 transform origin-center transition-all duration-300 ${
+                  activeTab === 'videos'
+                    ? 'scale-x-100 bg-gray-900'
+                    : 'scale-x-0 bg-gray-700 group-hover:scale-x-50'
+                }`}
+              ></div>
             </button>
           </div>
         </div>
@@ -209,16 +260,16 @@ const MediaGalleryPage: React.FC = () => {
       {/* Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-            <span className="ml-3 text-gray-600">Loading media content...</span>
+          <div className="flex flex-col items-center justify-center py-16">
+            <div className="animate-spin rounded-full h-10 w-10 border-[3px] border-gray-200 border-t-gray-800"></div>
+            <span className="mt-4 text-gray-600 font-medium">Loading media content...</span>
           </div>
         ) : error ? (
-          <div className="text-center py-12">
-            <p className="text-red-600 mb-4">{error}</p>
+          <div className="text-center py-16">
+            <p className="text-gray-800 mb-6 font-medium">{error}</p>
             <button
               onClick={() => fetchMediaContent(query)}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+              className="bg-gray-800 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-gray-700 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
             >
               Try Again
             </button>

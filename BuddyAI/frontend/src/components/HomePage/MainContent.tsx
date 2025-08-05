@@ -115,7 +115,7 @@ const MainContent: React.FC<MainContentProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col min-h-screen">
       <div className="flex justify-between items-center p-4 bg-[#f6f6f1]">
         <div className="flex items-center space-x-4">
           {/* Subject Dropdown */}
