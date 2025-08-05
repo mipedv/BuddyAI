@@ -2,10 +2,11 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import HeaderRight from '../HeaderRight';
 import ExplanationSelector from '../ExplanationSelector';
-import { Search } from 'lucide-react';
+import { Search, BookOpen, X } from 'lucide-react';
 import ChapterButtons from '../ChapterButtons';
 import { SUBJECTS_CHAPTERS } from '../HomePage';
 import axios from 'axios';
+import PDFTextbook from '../PDFTextbook';
 
 const INITIAL_SUGGESTED_TOPICS = [
   { label: 'Solar System' },
@@ -37,6 +38,7 @@ const MainContent: React.FC<MainContentProps> = ({
   const [isChapterDropdownOpen, setIsChapterDropdownOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showTextBookModal, setShowTextBookModal] = useState(false);
 
   const TOPIC_SPECIFIC_SUGGESTED_TOPICS = {
     'Solar System': [
@@ -185,7 +187,19 @@ const MainContent: React.FC<MainContentProps> = ({
         </div>
 
         {/* Header Right Component */}
-        <HeaderRight />
+        <div className="flex items-center space-x-4">
+          {/* Text Book Button */}
+          <button 
+            onClick={() => setShowTextBookModal(true)}
+            className="flex items-center space-x-2 px-4 py-2 border border-gray-200 rounded-lg transition-all duration-200 text-sm font-medium text-gray-600 hover:bg-gray-50 hover:border-gray-300"
+            title="Open Text Book"
+          >
+            <BookOpen className="w-5 h-5 text-gray-500" />
+            <span>Text Book</span>
+          </button>
+          
+          <HeaderRight />
+        </div>
       </div>
 
       {/* Chapter Buttons Component */}
@@ -317,6 +331,46 @@ const MainContent: React.FC<MainContentProps> = ({
           )}
         </div>
       </div>
+
+      {/* Text Book Modal */}
+      {showTextBookModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-50 backdrop-blur-sm animate-fade-in">
+          <div 
+            id="textbook-modal" 
+            className="relative bg-white rounded-lg shadow-xl w-full max-w-5xl h-[85vh] flex flex-col animate-scale-in"
+          >
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-[#007bff] to-[#6f42c1] text-white p-8 rounded-t-lg flex items-center justify-between">
+              <div className="flex items-center space-x-4">
+                <BookOpen size={32} className="text-white" />
+                <div className="flex flex-col">
+                  <h2 className="text-2xl font-bold">Science Textbook</h2>
+                  <p className="text-sm text-white/80 mt-1">Chapter: The Solar System</p>
+                </div>
+              </div>
+              <div className="flex items-center space-x-4">
+                <button 
+                  onClick={() => setShowTextBookModal(false)} 
+                  className="p-3 rounded-full hover:bg-white/20 transition-colors"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+            </div>
+            
+            {/* Modal Body - PDF Viewer */}
+            <div className="flex-1 overflow-hidden">
+              <PDFTextbook 
+                pdfUrl={`/media/textbook-chapters/text+book_1.pdf`}
+                onPopupClick={(selectedText) => {
+                  console.log('Text selected from home page PDF:', selectedText);
+                  // You can add navigation to response page here if needed
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
