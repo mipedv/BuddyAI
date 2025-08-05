@@ -23,62 +23,53 @@ const PDFTextbook: React.FC<PDFTextbookProps> = ({ pdfUrl, onTextSelection, onPo
   const [highlightPopupPosition, setHighlightPopupPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [selectedText, setSelectedText] = useState<string>('');
   
-  // Debug: Log the PDF URL
+  // Debug: Log the PDF URL with more details
   console.log('PDF URL:', pdfUrl);
+  console.log('PDF URL includes solar-chapter:', pdfUrl.includes('solar-chapter'));
+  console.log('PDF URL includes text+book:', pdfUrl.includes('text+book'));
 
-    // Clean CSS for PDF text selection - Following GPT best practices
   useEffect(() => {
+    console.log('🔍 PDFTextbook Debug Info:');
+    console.log('📁 PDF URL:', pdfUrl);
+    console.log('📁 PDF URL includes solar-chapter:', pdfUrl.includes('solar-chapter'));
+    console.log('📁 PDF URL includes solar:', pdfUrl.includes('solar'));
+    console.log('📁 PDF URL includes text+book:', pdfUrl.includes('text+book'));
+    console.log('📁 Full URL path:', window.location.origin + pdfUrl.split('?')[0]);
+    
+    // Inject CSS for text selection
     const style = document.createElement('style');
     style.textContent = `
-      .react-pdf__Page {
-        position: relative;
-      }
-
-      .react-pdf__Page__canvas {
-        display: block;
-        margin: 0 auto;
-      }
-
       .react-pdf__Page__textContent {
-        position: absolute;
-        top: 0;
-        left: 0;
-        user-select: text;
-        z-index: 10;
-        pointer-events: auto;
+        user-select: text !important;
+        pointer-events: auto !important;
+        z-index: 10 !important;
       }
-
       .react-pdf__Page__textContent span {
-        color: rgba(0, 0, 0, 0.01);
-        font-family: sans-serif;
-        cursor: text;
+        user-select: text !important;
+        pointer-events: auto !important;
+        z-index: 10 !important;
+        min-width: 1px !important;
       }
-
       .react-pdf__Page__textContent span:hover {
-        background: rgba(173, 216, 230, 0.2);
-        transition: background-color 0.1s ease;
+        background-color: rgba(255, 255, 0, 0.3) !important;
       }
-
       .react-pdf__Page__textContent span::selection {
-        background-color: rgba(255, 193, 7, 0.4);
-      }
-      
-      /* Debug mode */
-      .debug-mode .react-pdf__Page__textContent span {
-        background: rgba(255, 255, 0, 0.3) !important;
-        color: rgba(0, 0, 0, 0.7) !important;
-        border: 1px solid rgba(255, 255, 0, 0.6) !important;
+        background-color: rgba(0, 123, 255, 0.3) !important;
       }
     `;
     document.head.appendChild(style);
-    
     return () => {
-      document.head.removeChild(style);
+      if (document.head.contains(style)) {
+        document.head.removeChild(style);
+      }
     };
-  }, []);
+  }, [pdfUrl]);
 
   const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
     setNumPages(numPages);
+    console.log(`✅ PDF loaded successfully: ${pdfUrl}`);
+    console.log(`📄 Number of pages: ${numPages}`);
+    console.log(`📄 File size indicator: ${numPages > 10 ? 'LIKELY FULL TEXTBOOK' : 'LIKELY CHAPTER ONLY'}`);
   };
 
   const handleTextSelection = useCallback(() => {

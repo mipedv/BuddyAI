@@ -15,8 +15,11 @@
     "axios": "^1.11.0",
     "framer-motion": "^12.23.12",
     "lucide-react": "^0.525.0",
+    "mammoth": "^1.10.0",
+    "pdfjs-dist": "^3.11.174",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "react-pdf": "^7.7.3",
     "react-router-dom": "^7.7.1"
   },
   "devDependencies": {

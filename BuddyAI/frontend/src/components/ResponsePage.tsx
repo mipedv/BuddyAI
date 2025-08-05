@@ -1093,10 +1093,11 @@ const ResponsePage: React.FC = () => {
           
           {/* Modal Body - PDF Viewer */}
           <div className="flex-1 overflow-hidden">
-            <PDFTextbook 
-              pdfUrl={`/media/textbook-chapters/text+book_1.pdf`}
-              onPopupClick={handlePDFTextSelection}
-            />
+                          <PDFTextbook 
+                key={`solar-chapter-response-${Date.now()}-${Math.random()}`}
+                pdfUrl={`/media/chapters/solar.pdf?t=${Date.now()}&v=${Math.random()}`}
+                onPopupClick={handlePDFTextSelection}
+              />
           </div>
         </div>
       </div>

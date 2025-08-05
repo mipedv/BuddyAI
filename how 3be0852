@@ -1,0 +1,5 @@
+[33ma8c9dd8[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m Remove OCR-related code and cleanup frontend/backend files
+[33m3be0852[m feat: Add highlight-to-ask feature for answer and summary sections
+[33mbf3fdc8[m Enhance text selection in ResponsePage: Fix input field behavior and improve 'Explain this:' prefix handling
+[33me921f7e[m Enhance chapter image viewer in ResponsePage and fix LLM service syntax
+[33m01368ad[m Implement comprehensive textbook RAG system with strict mode enforcement

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import HeaderRight from '../HeaderRight';
 import ExplanationSelector from '../ExplanationSelector';
-import { Search, BookOpen, X } from 'lucide-react';
+import { Search, BookOpen, X, FileText } from 'lucide-react';
 import ChapterButtons from '../ChapterButtons';
 import { SUBJECTS_CHAPTERS } from '../HomePage';
 import axios from 'axios';
@@ -39,6 +39,8 @@ const MainContent: React.FC<MainContentProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showTextBookModal, setShowTextBookModal] = useState(false);
+  const [showFullChapterModal, setShowFullChapterModal] = useState(false);
+  const [showSummaryModal, setShowSummaryModal] = useState(false);
 
   const TOPIC_SPECIFIC_SUGGESTED_TOPICS = {
     'Solar System': [
@@ -116,6 +118,20 @@ const MainContent: React.FC<MainContentProps> = ({
     navigate('/chapter');
   };
 
+  const handleViewFullChapter = () => {
+    console.log('Opening Full Chapter Modal with solar.pdf');
+    console.log('PDF URL will be:', '/media/chapters/solar.pdf');
+    // Force cache busting with timestamp
+    const timestamp = Date.now();
+    console.log('Cache busting timestamp:', timestamp);
+    setShowFullChapterModal(true);
+  };
+
+  const handleViewSummary = () => {
+    console.log('Opening Solar System Summary Modal');
+    setShowSummaryModal(true);
+  };
+
   return (
     <div className="flex flex-col min-h-screen">
       <div className="flex justify-between items-center p-4 bg-[#f6f6f1]">
@@ -189,21 +205,29 @@ const MainContent: React.FC<MainContentProps> = ({
         {/* Header Right Component */}
         <div className="flex items-center space-x-4">
           {/* Text Book Button */}
-          <button 
-            onClick={() => setShowTextBookModal(true)}
-            className="flex items-center space-x-2 px-4 py-2 border border-gray-200 rounded-lg transition-all duration-200 text-sm font-medium text-gray-600 hover:bg-gray-50 hover:border-gray-300"
-            title="Open Text Book"
-          >
+                      <button 
+              onClick={() => {
+                console.log('Opening Text Book Modal with full textbook');
+                console.log('PDF URL will be:', '/media/textbook-chapters/text+book_1.pdf');
+                setShowTextBookModal(true);
+              }}
+              className="flex items-center space-x-2 px-4 py-2 border border-gray-200 rounded-lg transition-all duration-200 text-sm font-medium text-gray-600 hover:bg-gray-50 hover:border-gray-300"
+              title="Open Text Book"
+            >
             <BookOpen className="w-5 h-5 text-gray-500" />
             <span>Text Book</span>
           </button>
           
+
           <HeaderRight />
         </div>
       </div>
 
       {/* Chapter Buttons Component */}
-      <ChapterButtons />
+      <ChapterButtons 
+        onViewFullChapter={handleViewFullChapter}
+        onViewSummary={handleViewSummary}
+      />
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col justify-center items-center p-8">
@@ -361,12 +385,141 @@ const MainContent: React.FC<MainContentProps> = ({
             {/* Modal Body - PDF Viewer */}
             <div className="flex-1 overflow-hidden">
               <PDFTextbook 
-                pdfUrl={`/media/textbook-chapters/text+book_1.pdf`}
+                pdfUrl={`/media/textbook-chapters/text+book_1.pdf?t=${Date.now()}`}
                 onPopupClick={(selectedText) => {
-                  console.log('Text selected from home page PDF:', selectedText);
-                  // You can add navigation to response page here if needed
+                  console.log('Text selected from full textbook PDF:', selectedText);
                 }}
               />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Full Chapter Modal */}
+      {showFullChapterModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-50 backdrop-blur-sm animate-fade-in">
+          <div 
+            className="relative bg-white rounded-lg shadow-xl w-full max-w-5xl h-[85vh] flex flex-col animate-scale-in"
+          >
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-[#007bff] to-[#6f42c1] text-white p-8 rounded-t-lg flex items-center justify-between">
+              <div className="flex items-center space-x-4">
+                <BookOpen size={32} className="text-white" />
+                <div className="flex flex-col">
+                  <h2 className="text-2xl font-bold">Science Textbook</h2>
+                  <p className="text-sm text-white/80 mt-1">Chapter: The Solar System</p>
+                </div>
+              </div>
+              <div className="flex items-center space-x-4">
+                <button 
+                  onClick={() => setShowFullChapterModal(false)} 
+                  className="p-3 rounded-full hover:bg-white/20 transition-colors"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+            </div>
+            
+            {/* Modal Body - PDF Viewer */}
+            <div className="flex-1 overflow-hidden">
+              <PDFTextbook 
+                key={`solar-chapter-home-${Date.now()}-${Math.random()}`}
+                pdfUrl={`/media/chapters/solar.pdf?t=${Date.now()}&v=${Math.random()}`}
+                onPopupClick={(selectedText) => {
+                  console.log('Text selected from solar chapter PDF on Home Page:', selectedText);
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Summary Modal */}
+      {showSummaryModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-50 backdrop-blur-sm animate-fade-in">
+          <div 
+            className="relative bg-white rounded-lg shadow-xl w-full max-w-4xl h-[80vh] flex flex-col animate-scale-in"
+          >
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-[#007bff] to-[#6f42c1] text-white p-6 rounded-t-lg flex items-center justify-between">
+              <div className="flex items-center space-x-4">
+                <FileText size={28} className="text-white" />
+                <div className="flex flex-col">
+                  <h2 className="text-xl font-bold">Solar System Summary</h2>
+                  <p className="text-sm text-white/80 mt-1">Key Points & Overview</p>
+                </div>
+              </div>
+              <div className="flex items-center space-x-4">
+                <button 
+                  onClick={() => setShowSummaryModal(false)} 
+                  className="p-2 rounded-full hover:bg-white/20 transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+            
+            {/* Modal Body */}
+            <div className="flex-1 overflow-auto p-6">
+              <div className="bg-[#F8F7F0] rounded-lg p-4 mb-4">
+                <h3 className="font-medium text-gray-800 mb-3 flex items-center gap-2">
+                  <span className="w-2 h-2 bg-gray-600 rounded-full"></span>
+                  Solar System Chapter Summary
+                </h3>
+                <ul className="space-y-2">
+                  <li className="flex items-start gap-3 text-gray-700">
+                    <span className="w-1.5 h-1.5 bg-gray-500 rounded-full mt-2 flex-shrink-0"></span>
+                    <span className="leading-relaxed">
+                      The Solar System consists of the Sun at its center and all celestial bodies that orbit around it
+                    </span>
+                  </li>
+                  <li className="flex items-start gap-3 text-gray-700">
+                    <span className="w-1.5 h-1.5 bg-gray-500 rounded-full mt-2 flex-shrink-0"></span>
+                    <span className="leading-relaxed">
+                      Eight planets orbit the Sun: Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus, and Neptune
+                    </span>
+                  </li>
+                  <li className="flex items-start gap-3 text-gray-700">
+                    <span className="w-1.5 h-1.5 bg-gray-500 rounded-full mt-2 flex-shrink-0"></span>
+                    <span className="leading-relaxed">
+                      The Sun provides light and energy to all planets and makes up 99.86% of the system's mass
+                    </span>
+                  </li>
+                  <li className="flex items-start gap-3 text-gray-700">
+                    <span className="w-1.5 h-1.5 bg-gray-500 rounded-full mt-2 flex-shrink-0"></span>
+                    <span className="leading-relaxed">
+                      Planets are divided into terrestrial (rocky) and gas giants (Jupiter, Saturn, Uranus, Neptune)
+                    </span>
+                  </li>
+                  <li className="flex items-start gap-3 text-gray-700">
+                    <span className="w-1.5 h-1.5 bg-gray-500 rounded-full mt-2 flex-shrink-0"></span>
+                    <span className="leading-relaxed">
+                      Other objects include dwarf planets, asteroids in the asteroid belt, and comets with icy compositions
+                    </span>
+                  </li>
+                  <li className="flex items-start gap-3 text-gray-700">
+                    <span className="w-1.5 h-1.5 bg-gray-500 rounded-full mt-2 flex-shrink-0"></span>
+                    <span className="leading-relaxed">
+                      The Solar System formed approximately 4.6 billion years ago from a giant cloud of gas and dust
+                    </span>
+                  </li>
+                  <li className="flex items-start gap-3 text-gray-700">
+                    <span className="w-1.5 h-1.5 bg-gray-500 rounded-full mt-2 flex-shrink-0"></span>
+                    <span className="leading-relaxed">
+                      Gravity keeps all objects in orbit around the Sun, following elliptical paths
+                    </span>
+                  </li>
+                </ul>
+              </div>
+              
+              <div className="flex justify-end">
+                <button
+                  onClick={() => setShowSummaryModal(false)}
+                  className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700 transition-colors"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         </div>

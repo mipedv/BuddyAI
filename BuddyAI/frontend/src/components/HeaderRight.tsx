@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Share2 } from 'lucide-react';
 
 const HeaderRight: React.FC = () => {
     const [user, setUser] = useState({
@@ -30,42 +29,10 @@ const HeaderRight: React.FC = () => {
         navigate('/login');
     };
 
-    const handleShare = async () => {
-        if (navigator.share) {
-            try {
-                await navigator.share({
-                    title: 'BuddyAI - Learning Companion',
-                    text: 'Check out this amazing AI learning platform!',
-                    url: window.location.href,
-                });
-            } catch (err) {
-                console.log('Error sharing:', err);
-                // Fallback: copy URL to clipboard
-                navigator.clipboard.writeText(window.location.href);
-            }
-        } else {
-            // Fallback: copy URL to clipboard
-            try {
-                await navigator.clipboard.writeText(window.location.href);
-                // Could show a toast notification here
-                console.log('Link copied to clipboard');
-            } catch (err) {
-                console.error('Failed to copy link:', err);
-            }
-        }
-    };
+
 
     return (
         <div className="flex items-center gap-x-6 bg-[#f6f6f1] p-2 rounded-lg">
-            {/* Share Button */}
-            <button 
-                onClick={handleShare}
-                className="p-2 rounded-full hover:bg-gray-100 transition-colors"
-                title="Share"
-            >
-                <Share2 className="w-5 h-5 text-gray-600" />
-            </button>
-
             {/* Notification Bell */}
             <div className="relative">
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-blue-500">
