@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Share2, Search, Video, RefreshCw, FileText, BookOpen, Edit3, ThumbsUp, ThumbsDown, Copy, MoreHorizontal, X } from 'lucide-react';
 import AskBuddyAIButton from './AskBuddyAIButton';
@@ -63,6 +63,20 @@ const ResponsePage: React.FC = () => {
   const [highlightPopupPosition, setHighlightPopupPosition] = useState({ x: 0, y: 0 });
   const [selectedText, setSelectedText] = useState('');
   const [isInputExpanded, setIsInputExpanded] = useState(false);
+  // Draft mode: snapshot of the current selector to use at next submit
+  const [draftMode, setDraftMode] = useState<'textbook' | 'detailed' | 'advanced'>('textbook');
+
+  // Chat history (persistent conversation)
+  interface ChatMessage {
+    role: 'user' | 'assistant';
+    content: string;
+    mode?: 'textbook' | 'detailed' | 'advanced';
+    used_mode?: 'textbook' | 'detailed' | 'advanced';
+    mode_notes?: string;
+  }
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  const leftPaneRef = useRef<HTMLDivElement | null>(null);
+  const [isAutoScroll, setIsAutoScroll] = useState(true);
 
   // Modal states
   const [showFullChapterModal, setShowFullChapterModal] = useState(false);
@@ -77,7 +91,8 @@ const ResponsePage: React.FC = () => {
   // Initialize response and explanation type from URL
   useEffect(() => {
     if (location.state?.response) {
-      setResponse(location.state.response);
+      const initial = location.state.response;
+      setResponse(initial);
       const levelParam = new URLSearchParams(location.search).get('level');
       if (levelParam) {
         switch (levelParam) {
@@ -94,6 +109,18 @@ const ResponsePage: React.FC = () => {
             setExplanationType('Textbook Explanation');
         }
       }
+      // Seed chat history once with initial Q/A
+      setChatHistory((prev) => {
+        if (prev.length > 0) return prev;
+        const seeded: ChatMessage[] = [];
+        if (initial?.query) {
+          seeded.push({ role: 'user', content: initial.query });
+        }
+        if (initial?.answer) {
+          seeded.push({ role: 'assistant', content: initial.answer, used_mode: (initial.used_mode as any) });
+        }
+        return seeded;
+      });
     } else {
       navigate('/home');
     }
@@ -143,6 +170,20 @@ const ResponsePage: React.FC = () => {
     };
   }, [showMoreOptions, showHighlightPopup, isInputExpanded]);
 
+  // Auto-scroll controller: keep bottom unless user scrolls up
+  useEffect(() => {
+    const container = leftPaneRef.current;
+    if (!container) return;
+    if (isAutoScroll) {
+      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+    }
+  }, [chatHistory, isAutoScroll]);
+
+  // Keep draft mode aligned with current selector value; this does not trigger any request
+  useEffect(() => {
+    setDraftMode(getLevelForBackend(explanationType) as 'textbook' | 'detailed' | 'advanced');
+  }, [explanationType]);
+
   if (!response) {
     return (
       <div className="flex justify-center items-center h-screen bg-white">
@@ -181,6 +222,14 @@ const ResponsePage: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleLeftPaneScroll = () => {
+    const container = leftPaneRef.current;
+    if (!container) return;
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    // If user is near bottom, enable auto-scroll; otherwise lock
+    setIsAutoScroll(distanceFromBottom < 80);
   };
 
   // Simple text selection handlers
@@ -226,6 +275,8 @@ const ResponsePage: React.FC = () => {
     if (selectedText) {
       setFollowUpQuery(''); // Clear the input field
       setIsInputExpanded(true);
+      // Capture current selector into draft mode for this pending message
+      setDraftMode(getLevelForBackend(explanationType) as 'textbook' | 'detailed' | 'advanced');
       
       // Focus the existing input field
       setTimeout(() => {
@@ -256,6 +307,7 @@ const ResponsePage: React.FC = () => {
     setFollowUpQuery('');
     setIsInputExpanded(true);
     setSelectedText(text); // Store the selected text for the bubble
+    setDraftMode(getLevelForBackend(explanationType) as 'textbook' | 'detailed' | 'advanced');
     
     // Focus the existing input field
     setTimeout(() => {
@@ -268,42 +320,19 @@ const ResponsePage: React.FC = () => {
     console.log('PDF text selected for bubble:', text);
   };
 
-  // Function to handle explanation type change
-  const handleExplanationTypeChange = async (newExplanationType: string) => {
-    if (!response?.query || isLoading) return; // Prevent multiple simultaneous requests
+  // Helper: focus the main input
+  const focusMainInput = () => {
+    setTimeout(() => {
+      const inputElement = document.querySelector('input[placeholder="Ask anything"], input[placeholder="Ask follow-up"]') as HTMLInputElement;
+      if (inputElement) inputElement.focus();
+    }, 50);
+  };
 
-    setIsLoading(true);
-    setError(null);
+  // Function to handle explanation type change (no API call)
+  const handleExplanationTypeChange = (newExplanationType: string) => {
     setExplanationType(newExplanationType);
-
-    const newLevel = getLevelForBackend(newExplanationType);
-    
-    try {
-      const apiResponse = await axios.get(`http://localhost:8000/api/core/get-answer/`, {
-        params: {
-          query: response.query,
-          level: newLevel
-        }
-      });
-
-      // Update the response with new data
-      setResponse({
-        ...response,
-        answer: apiResponse.data.answer,
-        suggested_questions: apiResponse.data.suggested_questions,
-        level: newLevel
-      });
-
-      // Update URL without page reload
-      const newUrl = `/response?query=${encodeURIComponent(response.query)}&level=${newLevel}`;
-      window.history.pushState(null, '', newUrl);
-
-    } catch (err: any) {
-      console.error('Error fetching new explanation:', err);
-      setError(err.response?.data?.error || 'Failed to fetch explanation. Please try again.');
-    } finally {
-      setIsLoading(false);
-    }
+    // Update draft mode only; execution happens on explicit submit
+    setDraftMode(getLevelForBackend(newExplanationType) as 'textbook' | 'detailed' | 'advanced');
   };
 
 
@@ -326,29 +355,45 @@ const ResponsePage: React.FC = () => {
     try {
       setIsLoading(true);
 
-      // Use the combined query for submission
-      const apiResponse = await axios.get(`http://localhost:8000/api/core/get-answer/`, {
-        params: {
-          query: queryToSubmit,
-          level: getLevelForBackend(explanationType)
-        }
+      // Append user message locally first for immediate feedback
+      const requestedMode = draftMode;
+      const nextHistory = [...chatHistory, { role: 'user', content: queryToSubmit, mode: requestedMode }];
+      setChatHistory(nextHistory);
+
+      // Call conversational endpoint with history (multi-turn)
+      const chatResponse = await axios.post(`http://localhost:8000/api/core/chat/`, {
+        message: queryToSubmit,
+        level: requestedMode,
+        history: nextHistory,
       });
 
-        // Navigate to new response page with follow-up query
-        navigate('/response', {
-          state: { response: apiResponse.data }
-        });
+      const { answer, suggested_questions, level, used_mode, mode_notes } = chatResponse.data || {};
 
-      // Update URL with query parameters
-      window.history.pushState(
-        null, 
-        '', 
-        `/response?query=${encodeURIComponent(queryToSubmit)}&level=${getLevelForBackend(explanationType)}`
-      );
+      // Append assistant reply to chat
+      if (answer) {
+        setChatHistory((prev) => [...prev, { role: 'assistant', content: answer, used_mode, mode_notes }]);
+      }
+
+      // Keep legacy response object in sync (for existing UI pieces)
+      setResponse((prev: any) => ({
+        ...(prev || {}),
+        query: queryToSubmit,
+        answer: answer || (prev?.answer ?? ''),
+        suggested_questions: suggested_questions || prev?.suggested_questions || [],
+        level: level || requestedMode,
+        used_mode,
+        mode_notes,
+      }));
+
+      // Update URL (no navigation/reload)
+      window.history.pushState(null, '', `/response?query=${encodeURIComponent(queryToSubmit)}&level=${requestedMode}`);
 
       // Reset follow-up query and expanded state
       setFollowUpQuery('');
       setIsInputExpanded(false);
+      setSelectedText('');
+      // Reset draft mode to reflect current selector for the next message
+      setDraftMode(getLevelForBackend(explanationType) as 'textbook' | 'detailed' | 'advanced');
     } catch (err: any) {
       console.error('Error submitting follow-up query:', err);
       setError(err.response?.data?.error || 'Failed to submit follow-up query. Please try again.');
@@ -695,7 +740,11 @@ const ResponsePage: React.FC = () => {
         {/* Two-Column Layout */}
         <div className="flex flex-1">
           {/* Left Column - Main Q&A Section (70%) */}
-          <div className="w-[70%] h-full overflow-y-auto p-8 bg-white">
+          <div
+            className="w-[70%] h-full overflow-y-auto p-8 bg-white"
+            ref={leftPaneRef}
+            onScroll={handleLeftPaneScroll}
+          >
             {/* Question Header */}
             <div className="mb-6">
               <div className="flex items-center gap-4 mb-3">
@@ -784,23 +833,56 @@ const ResponsePage: React.FC = () => {
               </div>
             )}
 
-            {/* Answer Section */}
+            {/* Chat Section */}
             <div className="prose max-w-none mb-8">
-              <div 
-                className="lesson-content answer-text text-base leading-7 text-gray-700"
-                onMouseUp={handleTextSelection}
-                onTouchEnd={handleTextSelection}
-                style={{ userSelect: 'text' }}
-              >
-                {isLoading ? (
-                  <div className="flex items-center gap-3">
-                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
-                    <span>Generating {explanationType.toLowerCase()}...</span>
-                  </div>
-                ) : (
-                  response.answer
-                )}
-              </div>
+              {chatHistory.length === 0 ? (
+                <div className="text-gray-500">Start the conversation by asking a question.</div>
+              ) : (
+                <div className="space-y-6">
+                  {chatHistory.map((msg, idx) => (
+                    <div key={idx} className="">
+                      {msg.role === 'user' ? (
+                        <div className="flex justify-end">
+                          <div className="max-w-[80%] bg-blue-50 text-gray-800 px-4 py-2 rounded-2xl rounded-tr-sm whitespace-pre-wrap">
+                            <div className="flex items-center justify-end gap-2 mb-1">
+                              {msg.mode && (
+                                <span className="text-[10px] uppercase tracking-wide text-blue-700 bg-blue-100 rounded px-2 py-0.5">{msg.mode}</span>
+                              )}
+                            </div>
+                            {msg.content}
+                          </div>
+                        </div>
+                      ) : (
+                        <div 
+                          className="lesson-content answer-text text-base leading-7 text-gray-700"
+                          onMouseUp={handleTextSelection}
+                          onTouchEnd={handleTextSelection}
+                          style={{ userSelect: 'text' }}
+                        >
+                          {isLoading && idx === chatHistory.length - 1 ? (
+                            <div className="flex items-center gap-3">
+                              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                              <span>Generating {explanationType.toLowerCase()}...</span>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="flex items-center gap-2 mb-2">
+                                {msg.used_mode && (
+                                  <span className="text-[10px] uppercase tracking-wide text-gray-700 bg-gray-100 rounded px-2 py-0.5">{msg.used_mode}</span>
+                                )}
+                                {msg.mode_notes && (
+                                  <span className="text-[10px] text-amber-700 bg-amber-100 rounded px-2 py-0.5">{msg.mode_notes}</span>
+                                )}
+                              </div>
+                              {msg.content}
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="flex items-center justify-between mt-6">
                 <div className="flex items-center gap-4">
                   <button 
@@ -867,7 +949,7 @@ const ResponsePage: React.FC = () => {
               </div>
             </div>
 
-            {/* Suggested Questions */}
+            {/* Suggested Questions (click-to-input) */}
             {(response.suggested_questions && response.suggested_questions.length > 0) || isLoading ? (
               <div className="mb-8">
                 <h3 className="text-lg font-semibold mb-4">Suggested Questions</h3>
@@ -881,7 +963,12 @@ const ResponsePage: React.FC = () => {
                     response.suggested_questions.map((question: string, index: number) => (
                       <button
                         key={index}
-                        onClick={() => navigate(`/response?query=${encodeURIComponent(question)}&level=${getLevelForBackend(explanationType)}`)}
+                        onClick={() => {
+                          setIsInputExpanded(false);
+                          setSelectedText('');
+                          setFollowUpQuery(question);
+                          focusMainInput();
+                        }}
                         className="w-full text-left py-3 px-0 text-gray-700 hover:bg-gray-50 transition-colors"
                       >
                         {question}

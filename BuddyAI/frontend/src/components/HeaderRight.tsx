@@ -29,8 +29,6 @@ const HeaderRight: React.FC = () => {
         navigate('/login');
     };
 
-
-
     return (
         <div className="flex items-center gap-x-6 bg-[#f6f6f1] p-2 rounded-lg">
             {/* Notification Bell */}

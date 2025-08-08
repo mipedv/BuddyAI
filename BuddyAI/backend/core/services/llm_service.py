@@ -270,24 +270,31 @@ ADVANCED COMPREHENSIVE EXPLANATION:"""
                     "success": False,
                     "answer": f"The textbook doesn't contain enough information to answer: '{message}'. Please try asking about topics that are covered in your science textbook.",
                     "suggested_questions": self._get_topic_specific_questions(message),
-                    "source": "textbook_only"
+                    "source": "textbook_only",
+                    "used_mode": "textbook",
+                    "mode_notes": "Insufficient textbook chunks found to confidently answer."
                 }
-            
+
+            # Successful textbook answer
             return {
                 "success": True,
                 "answer": answer,
                 "suggested_questions": self.generate_suggested_questions(answer),
                 "source": "textbook_only",
-                "chunks_used": len(chunks)
+                "chunks_used": len(chunks),
+                "used_mode": "textbook",
+                "mode_notes": "Answer generated strictly from retrieved textbook chunks."
             }
-            
+
         except Exception as e:
             print(f"❌ Error generating textbook answer: {e}")
             return {
                 "success": False,
                 "answer": "Error generating textbook explanation. Please try again.",
                 "suggested_questions": self._get_topic_specific_questions(message),
-                "source": "textbook_only"
+                "source": "textbook_only",
+                "used_mode": "textbook",
+                "mode_notes": "Exception occurred during textbook generation"
             }
     
     def generate_detailed_answer(self, message: str) -> str:
@@ -485,11 +492,18 @@ Provide only the 3 questions, one per line:"""
                 "suggested_questions": result.get("suggested_questions", []),
                 "level": level,
                 "success": result.get("success", True),
-                "source": result.get("source", "textbook_only")
+                "source": result.get("source", "textbook_only"),
+                "used_mode": result.get("used_mode", "textbook"),
+                "mode_notes": result.get("mode_notes")
             }
         
         # For other modes
         answer = self.generate_answer(message, level, history)
+        used_mode = level if level in ("textbook", "detailed", "advanced") else "textbook"
+        mode_notes = (
+            "Detailed mode: textbook grounded with light elaboration" if used_mode == "detailed"
+            else "Advanced mode: allows deeper reasoning beyond textbook"
+        )
         suggested_questions = self.generate_suggested_questions(answer)
         
         return {
@@ -497,7 +511,9 @@ Provide only the 3 questions, one per line:"""
             "suggested_questions": suggested_questions,
             "level": level,
             "success": True,
-            "source": f"{level}_mode"
+            "source": f"{level}_mode",
+            "used_mode": used_mode,
+            "mode_notes": mode_notes
         }
     
     def get_service_status(self) -> Dict[str, Any]:

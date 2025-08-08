@@ -2,6 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
+/* (Theme tokens removed per request; keeping existing styling) */
+
 /* Custom animations for Highlight-to-Ask feature */
 @keyframes fade-in {
   from {
