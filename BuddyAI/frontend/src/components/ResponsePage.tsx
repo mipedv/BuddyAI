@@ -54,9 +54,15 @@ const ResponsePage: React.FC = () => {
 
   // Feature states
   const [isVoiceMode, setIsVoiceMode] = useState(false);
-  const [micState, setMicState] = useState<'idle' | 'listening' | 'speaking'>('idle');
+  const [micState, setMicState] = useState<'idle' | 'listening' | 'processing' | 'speaking'>('idle');
   const recognitionRef = useRef<any>(null);
   const ttsUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  // Voice Session overlay state
+  const [isVoiceSession, setIsVoiceSession] = useState(false);
+  const [sessionTurns, setSessionTurns] = useState<ChatMessage[]>([]);
+  const [sessionPartial, setSessionPartial] = useState<string>('');
+  const [showCaptions, setShowCaptions] = useState<boolean>(false); // accessibility toggle (off by default)
+  const [sessionStatus, setSessionStatus] = useState<string>('Ready');
   const [rating, setRating] = useState<'up' | 'down' | null>(null);
   const [copied, setCopied] = useState(false);
   const [showMoreOptions, setShowMoreOptions] = useState(false);
@@ -233,6 +239,135 @@ const ResponsePage: React.FC = () => {
     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
     // If user is near bottom, enable auto-scroll; otherwise lock
     setIsAutoScroll(distanceFromBottom < 80);
+  };
+
+  // Voice Session helpers
+  const startTTS = (text: string) => {
+    if (!('speechSynthesis' in window) || !text) return;
+    try {
+      window.speechSynthesis.cancel();
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = 'en-US';
+      const voices = window.speechSynthesis.getVoices();
+      const preferred = voices.find(v => /en-US/i.test(v.lang) && /Female|Samantha|Google US English|Jenny|Aria/i.test(v.name)) || voices.find(v => /en/i.test(v.lang));
+      if (preferred) utter.voice = preferred;
+      utter.onstart = () => setMicState('speaking');
+      utter.onend = () => {
+        setMicState('idle');
+        // Auto resume listening if still in session
+        if (isVoiceSession) startListeningInSession();
+      };
+      ttsUtteranceRef.current = utter;
+      window.speechSynthesis.speak(utter);
+    } catch {}
+  };
+
+  const processVoiceTurn = async (finalText: string) => {
+    if (!finalText.trim()) return;
+    const requestedMode = draftMode;
+    // Append user turn to session buffer
+    const userTurn: ChatMessage = { role: 'user', content: finalText.trim(), mode: requestedMode };
+    setSessionTurns(prev => [...prev, userTurn]);
+    setSessionPartial('');
+    setMicState('processing');
+    try {
+      setIsLoading(true);
+      // Build history: existing chat + session so far + this user turn
+      const tempHistory = [...chatHistory, ...[...sessionTurns, userTurn]];
+      const chatResponse = await axios.post(`http://localhost:8000/api/core/chat/`, {
+        message: finalText.trim(),
+        level: requestedMode,
+        history: tempHistory,
+      });
+      const { answer, used_mode, mode_notes } = chatResponse.data || {};
+      const assistantTurn: ChatMessage = { role: 'assistant', content: answer || '', used_mode, mode_notes };
+      setSessionTurns(prev => [...prev, assistantTurn]);
+      // Speak the reply
+      if (answer) startTTS(answer);
+    } catch {
+      // Ignore errors in MVP loop
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const startListeningInSession = () => {
+    try {
+      const SpeechRecognition: any = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (!SpeechRecognition) { return; }
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch {}
+        recognitionRef.current = null;
+      }
+      const rec = new SpeechRecognition();
+      recognitionRef.current = rec;
+      rec.lang = 'en-US';
+      rec.interimResults = true;
+      rec.continuous = false; // single utterance; we'll restart on end
+      rec.onstart = () => { setMicState('listening'); setSessionStatus('Listening…'); };
+      rec.onend = () => {
+        if (isVoiceSession && micState !== 'speaking') {
+          // Keep listening loop if session ongoing
+          try { rec.start(); } catch {}
+        } else {
+          setMicState('idle');
+        }
+      };
+      rec.onerror = (e: any) => { setMicState('idle'); setSessionStatus(e?.error || 'Mic error'); };
+      rec.onresult = (e: any) => {
+        let interim = '';
+        let finalText = '';
+        for (let i = e.resultIndex; i < e.results.length; ++i) {
+          const transcript = e.results[i][0].transcript;
+          if (e.results[i].isFinal) finalText += transcript + ' ';
+          else interim += transcript;
+        }
+        if (finalText.trim()) {
+          processVoiceTurn(finalText);
+        } else {
+          // Update live captions only if accessibility toggle is on; otherwise ignore
+          if (showCaptions) setSessionPartial(interim.trim());
+        }
+      };
+      rec.start();
+    } catch {}
+  };
+
+  const openVoiceSession = () => {
+    setIsVoiceSession(true);
+    setSessionTurns([]);
+    setSessionPartial('');
+    setSessionStatus('Ready');
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+    // Pre-warm mic permission, then start listening
+    if (navigator.mediaDevices?.getUserMedia) {
+      navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+        // immediately stop tracks (we only want permission)
+        stream.getTracks().forEach(t => t.stop());
+        startListeningInSession();
+      }).catch(() => {
+        startListeningInSession();
+      });
+    } else {
+      startListeningInSession();
+    }
+  };
+
+  const closeVoiceSession = () => {
+    setIsVoiceSession(false);
+    try { if (recognitionRef.current) recognitionRef.current.stop(); } catch {}
+    recognitionRef.current = null;
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+    setMicState('idle');
+    // Append buffered session turns to main chat history
+    if (sessionTurns.length > 0) {
+      setChatHistory(prev => [...prev, ...sessionTurns]);
+      // Update response panel with latest assistant answer if present
+      const lastAssistant = [...sessionTurns].reverse().find(t => t.role === 'assistant');
+      if (lastAssistant) {
+        setResponse((prev: any) => ({ ...(prev || {}), answer: lastAssistant.content }));
+      }
+    }
   };
 
   // Simple text selection handlers
@@ -1158,45 +1293,7 @@ const ResponsePage: React.FC = () => {
 
                   {/* Voice/Send Button */}
                   <button 
-                    onClick={followUpQuery.trim() ? handleFollowUpSubmit : () => {
-                      const next = !isVoiceMode;
-                      setIsVoiceMode(next);
-                      try {
-                        const SpeechRecognition: any = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-                        if (!SpeechRecognition) { alert('Speech Recognition not supported.'); return; }
-                        if (next) {
-                          if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-                          const rec = new SpeechRecognition();
-                          recognitionRef.current = rec;
-                          rec.lang = 'en-US';
-                          rec.interimResults = true;
-                          rec.continuous = true;
-                          rec.onstart = () => setMicState('listening');
-                          rec.onend = () => { if (isVoiceMode) rec.start(); else setMicState('idle'); };
-                          rec.onerror = () => setMicState('idle');
-                          rec.onresult = (e: any) => {
-                            let interim = '';
-                            let finalText = '';
-                            for (let i = e.resultIndex; i < e.results.length; ++i) {
-                              const transcript = e.results[i][0].transcript;
-                              if (e.results[i].isFinal) finalText += transcript + ' ';
-                              else interim += transcript;
-                            }
-                            if (finalText.trim()) {
-                              setFollowUpQuery(finalText.trim());
-                              if (!isLoading) handleFollowUpSubmit();
-                            } else {
-                              setFollowUpQuery(interim.trim());
-                            }
-                          };
-                          rec.start();
-                        } else {
-                          if (recognitionRef.current) { try { recognitionRef.current.stop(); } catch {} recognitionRef.current = null; }
-                          if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-                          setMicState('idle');
-                        }
-                      } catch {}
-                    }}
+                    onClick={followUpQuery.trim() ? handleFollowUpSubmit : openVoiceSession}
                     className="w-10 h-10 bg-white border border-gray-200 rounded-full flex items-center justify-center hover:bg-gray-100 transition-colors"
                     title={followUpQuery.trim() ? "Send" : "Voice Mode"}
                   >
@@ -1378,6 +1475,64 @@ const ResponsePage: React.FC = () => {
         onAsk={handlePopupClick}
         visible={showHighlightPopup}
       />
+
+      {/* Voice Session Overlay */}
+      {isVoiceSession && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 flex flex-col items-center gap-6">
+            <div className="w-full flex items-center justify-between">
+              <div className="text-sm text-gray-600">{sessionStatus}</div>
+              <div className="flex items-center gap-3">
+                {/* Optional captions toggle, off by default */}
+                <label className="flex items-center gap-1 text-xs text-gray-600 select-none">
+                  <input type="checkbox" checked={showCaptions} onChange={(e)=>setShowCaptions(e.target.checked)} />
+                  Show captions
+                </label>
+                <button aria-label="End session" onClick={closeVoiceSession} className="p-2 rounded-full hover:bg-gray-100" title="End">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+              </div>
+            </div>
+            {/* Animated orb/avatar */}
+            <div className={`w-32 h-32 rounded-full ${micState==='listening' ? 'bg-blue-100 animate-pulse' : micState==='speaking' ? 'bg-green-100 animate-pulse' : 'bg-gray-100'} flex items-center justify-center`}> 
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-10 h-10 text-gray-600"><path d="M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3Z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1a1 1 0 0 1 2 0v1a5 5 0 0 0 10 0v-1a1 1 0 0 1 2 0Z"/><path d="M12 18a1 1 0 0 1 1 1v2a1 1 0 1 1-2 0v-2a1 1 0 0 1 1-1Z"/></svg>
+            </div>
+            {/* Big Mic Button */}
+            <button
+              aria-label={micState==='listening' ? 'Stop listening' : 'Start listening'}
+              onClick={() => {
+                if (micState==='speaking' && 'speechSynthesis' in window) {
+                  window.speechSynthesis.cancel();
+                  setMicState('idle');
+                }
+                if (micState==='listening') {
+                  try { if (recognitionRef.current) recognitionRef.current.stop(); } catch {}
+                  setMicState('idle');
+                } else {
+                  startListeningInSession();
+                }
+              }}
+              className={`w-20 h-20 rounded-full text-white text-sm font-medium ${micState==='listening' ? 'bg-red-600 animate-pulse' : 'bg-black hover:bg-gray-800'}`}
+            >
+              {micState==='listening' ? 'Stop' : 'Mic'}
+            </button>
+            {/* Captions area only when enabled */}
+            {showCaptions && (
+              <div className="w-full text-center text-gray-600 text-sm">
+                {sessionTurns.length>0 && <div className="mb-1">(Captions hidden in history; visible here only)</div>}
+                {!!sessionPartial && <em>{sessionPartial}</em>}
+              </div>
+            )}
+            <div className="flex items-center justify-center gap-3">
+              <button
+                aria-label="Stop audio"
+                onClick={() => { if ('speechSynthesis' in window) window.speechSynthesis.cancel(); setMicState('idle'); }}
+                className="px-4 py-2 rounded-lg border border-gray-300 hover:bg-gray-100"
+              >Stop Audio</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };
