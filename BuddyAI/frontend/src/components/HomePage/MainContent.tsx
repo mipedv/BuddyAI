@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import HeaderRight from '../HeaderRight';
 import ExplanationSelector from '../ExplanationSelector';
@@ -38,6 +38,9 @@ const MainContent: React.FC<MainContentProps> = ({
   const [isChapterDropdownOpen, setIsChapterDropdownOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isVoiceMode, setIsVoiceMode] = useState(false);
+  const [micState, setMicState] = useState<'idle' | 'listening' | 'speaking'>('idle');
+  const recognitionRef = useRef<any>(null);
   const [showTextBookModal, setShowTextBookModal] = useState(false);
   const [showFullChapterModal, setShowFullChapterModal] = useState(false);
   const [showSummaryModal, setShowSummaryModal] = useState(false);
@@ -260,9 +263,39 @@ const MainContent: React.FC<MainContentProps> = ({
               <div className="absolute right-2 top-1/2 transform -translate-y-1/2 flex items-center space-x-2">
                 {/* Mic Button */}
                 <button
-                  onClick={() => console.log('Microphone clicked')}
-                  className="w-8 h-8 bg-black rounded-full flex items-center justify-center
-                    transition-all duration-200 hover:bg-gray-700 hover:scale-105 active:scale-95"
+                  onClick={() => {
+                    try {
+                      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+                      const SpeechRecognition: any = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+                      if (!SpeechRecognition) { alert('Speech Recognition not supported.'); return; }
+                      if (recognitionRef.current) {
+                        recognitionRef.current.stop();
+                        recognitionRef.current = null;
+                        setMicState('idle');
+                        return;
+                      }
+                      const rec = new SpeechRecognition();
+                      recognitionRef.current = rec;
+                      rec.lang = 'en-US';
+                      rec.interimResults = true;
+                      rec.continuous = false;
+                      rec.onstart = () => setMicState('listening');
+                      rec.onend = () => setMicState('idle');
+                      rec.onerror = () => setMicState('idle');
+                      rec.onresult = (e: any) => {
+                        let interim = '';
+                        let finalText = '';
+                        for (let i = e.resultIndex; i < e.results.length; ++i) {
+                          const transcript = e.results[i][0].transcript;
+                          if (e.results[i].isFinal) finalText += transcript + ' ';
+                          else interim += transcript;
+                        }
+                        setQuery((finalText || interim).trim());
+                      };
+                      rec.start();
+                    } catch {}
+                  }}
+                  className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${micState==='listening' ? 'bg-red-600 animate-pulse' : 'bg-black hover:bg-gray-700'} hover:scale-105 active:scale-95`}
                   title="Microphone"
                   disabled={loading} // Disable button while loading
                 >
@@ -280,7 +313,45 @@ const MainContent: React.FC<MainContentProps> = ({
 
                 {/* Voice/Send Button */}
                 <button
-                  onClick={query.trim() ? handleSubmit : () => console.log('Voice mode')}
+                  onClick={query.trim() ? handleSubmit : () => {
+                    const next = !isVoiceMode;
+                    setIsVoiceMode(next);
+                    try {
+                      const SpeechRecognition: any = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+                      if (!SpeechRecognition) { alert('Speech Recognition not supported.'); return; }
+                      if (next) {
+                        if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+                        const rec = new SpeechRecognition();
+                        recognitionRef.current = rec;
+                        rec.lang = 'en-US';
+                        rec.interimResults = true;
+                        rec.continuous = true;
+                        rec.onstart = () => setMicState('listening');
+                        rec.onend = () => { if (isVoiceMode) rec.start(); else setMicState('idle'); };
+                        rec.onerror = () => setMicState('idle');
+                        rec.onresult = async (e: any) => {
+                          let interim = '';
+                          let finalText = '';
+                          for (let i = e.resultIndex; i < e.results.length; ++i) {
+                            const transcript = e.results[i][0].transcript;
+                            if (e.results[i].isFinal) finalText += transcript + ' ';
+                            else interim += transcript;
+                          }
+                          if (finalText.trim()) {
+                            setQuery(finalText.trim());
+                            if (!loading) handleSubmit();
+                          } else {
+                            setQuery(interim.trim());
+                          }
+                        };
+                        rec.start();
+                      } else {
+                        if (recognitionRef.current) { try { recognitionRef.current.stop(); } catch {} recognitionRef.current = null; }
+                        if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+                        setMicState('idle');
+                      }
+                    } catch {}
+                  }}
                   className="w-8 h-8 bg-white border border-gray-200 rounded-full flex items-center justify-center
                     transition-all duration-200 hover:bg-gray-100 hover:scale-105 active:scale-95"
                   title={query.trim() ? "Send" : "Voice Mode"}

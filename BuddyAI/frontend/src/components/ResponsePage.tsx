@@ -54,6 +54,9 @@ const ResponsePage: React.FC = () => {
 
   // Feature states
   const [isVoiceMode, setIsVoiceMode] = useState(false);
+  const [micState, setMicState] = useState<'idle' | 'listening' | 'speaking'>('idle');
+  const recognitionRef = useRef<any>(null);
+  const ttsUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const [rating, setRating] = useState<'up' | 'down' | null>(null);
   const [copied, setCopied] = useState(false);
   const [showMoreOptions, setShowMoreOptions] = useState(false);
@@ -357,7 +360,7 @@ const ResponsePage: React.FC = () => {
 
       // Append user message locally first for immediate feedback
       const requestedMode = draftMode;
-      const nextHistory = [...chatHistory, { role: 'user', content: queryToSubmit, mode: requestedMode }];
+      const nextHistory: ChatMessage[] = [...chatHistory, { role: 'user' as const, content: queryToSubmit, mode: requestedMode }];
       setChatHistory(nextHistory);
 
       // Call conversational endpoint with history (multi-turn)
@@ -394,6 +397,21 @@ const ResponsePage: React.FC = () => {
       setSelectedText('');
       // Reset draft mode to reflect current selector for the next message
       setDraftMode(getLevelForBackend(explanationType) as 'textbook' | 'detailed' | 'advanced');
+      // If voice mode is active, speak the response
+      if (isVoiceMode && answer && 'speechSynthesis' in window) {
+        try {
+          window.speechSynthesis.cancel();
+          const utter = new SpeechSynthesisUtterance(answer);
+          utter.lang = 'en-US';
+          const voices = window.speechSynthesis.getVoices();
+          const preferred = voices.find(v => /en-US/i.test(v.lang) && /Female|Samantha|Google US English|Jenny|Aria/i.test(v.name)) || voices.find(v => /en/i.test(v.lang));
+          if (preferred) utter.voice = preferred;
+          utter.onstart = () => setMicState('speaking');
+          utter.onend = () => setMicState('idle');
+          ttsUtteranceRef.current = utter;
+          window.speechSynthesis.speak(utter);
+        } catch {}
+      }
     } catch (err: any) {
       console.error('Error submitting follow-up query:', err);
       setError(err.response?.data?.error || 'Failed to submit follow-up query. Please try again.');
@@ -795,13 +813,52 @@ const ResponsePage: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-4">
-                  {/* Voice Mode Button */}
-                  <button className="w-10 h-10 bg-white border border-gray-200 rounded-full flex items-center justify-center transition-all duration-200 hover:bg-gray-100 hover:scale-105 active:scale-95" title="Listen to answer">
-                    <img
-                      src="/media/button logo.png"
-                      alt="Voice Mode"
-                      className="w-7 h-7 object-contain"
-                    />
+                  {/* Speaker Button - reads latest answer */}
+                  <button
+                    aria-label="Read latest answer"
+                    title="Read latest answer"
+                    onClick={() => {
+                      try {
+                        // If already speaking, stop immediately
+                        if ('speechSynthesis' in window && micState === 'speaking') {
+                          window.speechSynthesis.cancel();
+                          setMicState('idle');
+                          return;
+                        }
+
+                        // Find the most recent assistant message
+                        let latestText = '';
+                        for (let i = chatHistory.length - 1; i >= 0; i--) {
+                          const msg = chatHistory[i];
+                          if (msg.role === 'assistant' && msg.content && msg.content.trim().length > 0) {
+                            latestText = msg.content.trim();
+                            break;
+                          }
+                        }
+
+                        if (!latestText) return; // Nothing to read yet
+
+                        if ('speechSynthesis' in window) {
+                          window.speechSynthesis.cancel();
+                          const utter = new SpeechSynthesisUtterance(latestText);
+                          utter.lang = 'en-US';
+                          const voices = window.speechSynthesis.getVoices();
+                          const preferred = voices.find(v => /en-US/i.test(v.lang) && /Female|Samantha|Google US English|Jenny|Aria/i.test(v.name)) || voices.find(v => /en/i.test(v.lang));
+                          if (preferred) utter.voice = preferred;
+                          utter.onstart = () => setMicState('speaking');
+                          utter.onend = () => setMicState('idle');
+                          ttsUtteranceRef.current = utter;
+                          window.speechSynthesis.speak(utter);
+                        }
+                      } catch {}
+                    }}
+                    className={`w-10 h-10 rounded-full flex items-center justify-center border border-gray-200 transition-all ${micState==='speaking' ? 'bg-green-100 animate-pulse' : 'bg-white hover:bg-gray-100'}`}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6 text-gray-700">
+                      <path d="M3 10v4a1 1 0 001 1h2l3 3V6L6 9H4a1 1 0 00-1 1z"/>
+                      <path d="M16.5 12a4.5 4.5 0 00-2.25-3.897v7.794A4.5 4.5 0 0016.5 12z"/>
+                      <path d="M14.25 5.5v13a7 7 0 000-13z"/>
+                    </svg>
                   </button>
 
                   {/* Explanation Level Dropdown */}
@@ -1052,8 +1109,39 @@ const ResponsePage: React.FC = () => {
                 <div className={`absolute right-2 flex items-center space-x-2 ${isInputExpanded ? 'bottom-2' : 'top-1/2 transform -translate-y-1/2'}`}>
                   {/* Mic Button */}
                   <button 
-                    onClick={() => console.log('Microphone clicked')}
-                    className="w-10 h-10 bg-black rounded-full flex items-center justify-center hover:bg-gray-800 transition-colors"
+                    onClick={() => {
+                      try {
+                        if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+                        const SpeechRecognition: any = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+                        if (!SpeechRecognition) { alert('Speech Recognition not supported.'); return; }
+                        if (recognitionRef.current) {
+                          recognitionRef.current.stop();
+                          recognitionRef.current = null;
+                          setMicState('idle');
+                          return;
+                        }
+                        const rec = new SpeechRecognition();
+                        recognitionRef.current = rec;
+                        rec.lang = 'en-US';
+                        rec.interimResults = true;
+                        rec.continuous = false;
+                        rec.onstart = () => setMicState('listening');
+                        rec.onend = () => setMicState('idle');
+                        rec.onerror = () => setMicState('idle');
+                        rec.onresult = (e: any) => {
+                          let interim = '';
+                          let finalText = '';
+                          for (let i = e.resultIndex; i < e.results.length; ++i) {
+                            const transcript = e.results[i][0].transcript;
+                            if (e.results[i].isFinal) finalText += transcript + ' ';
+                            else interim += transcript;
+                          }
+                          setFollowUpQuery((finalText || interim).trim());
+                        };
+                        rec.start();
+                      } catch {}
+                    }}
+                    className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${micState==='listening' ? 'bg-red-600 animate-pulse' : 'bg-black hover:bg-gray-800'}`}
                     title="Microphone"
                   >
                     <svg 
@@ -1070,7 +1158,45 @@ const ResponsePage: React.FC = () => {
 
                   {/* Voice/Send Button */}
                   <button 
-                    onClick={followUpQuery.trim() ? handleFollowUpSubmit : handleVoiceMode}
+                    onClick={followUpQuery.trim() ? handleFollowUpSubmit : () => {
+                      const next = !isVoiceMode;
+                      setIsVoiceMode(next);
+                      try {
+                        const SpeechRecognition: any = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+                        if (!SpeechRecognition) { alert('Speech Recognition not supported.'); return; }
+                        if (next) {
+                          if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+                          const rec = new SpeechRecognition();
+                          recognitionRef.current = rec;
+                          rec.lang = 'en-US';
+                          rec.interimResults = true;
+                          rec.continuous = true;
+                          rec.onstart = () => setMicState('listening');
+                          rec.onend = () => { if (isVoiceMode) rec.start(); else setMicState('idle'); };
+                          rec.onerror = () => setMicState('idle');
+                          rec.onresult = (e: any) => {
+                            let interim = '';
+                            let finalText = '';
+                            for (let i = e.resultIndex; i < e.results.length; ++i) {
+                              const transcript = e.results[i][0].transcript;
+                              if (e.results[i].isFinal) finalText += transcript + ' ';
+                              else interim += transcript;
+                            }
+                            if (finalText.trim()) {
+                              setFollowUpQuery(finalText.trim());
+                              if (!isLoading) handleFollowUpSubmit();
+                            } else {
+                              setFollowUpQuery(interim.trim());
+                            }
+                          };
+                          rec.start();
+                        } else {
+                          if (recognitionRef.current) { try { recognitionRef.current.stop(); } catch {} recognitionRef.current = null; }
+                          if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+                          setMicState('idle');
+                        }
+                      } catch {}
+                    }}
                     className="w-10 h-10 bg-white border border-gray-200 rounded-full flex items-center justify-center hover:bg-gray-100 transition-colors"
                     title={followUpQuery.trim() ? "Send" : "Voice Mode"}
                   >
