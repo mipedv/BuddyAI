@@ -1,5 +1,5 @@
 from django.urls import path
-from core.views import llm_view, chat_views, media_search_views, chapter_view
+from core.views import llm_view, chat_views, media_search_views, chapter_view, translate_view
 
 urlpatterns = [
     # LLM specific endpoints
@@ -15,6 +15,10 @@ urlpatterns = [
     # Media search endpoints
     path("search-images/", media_search_views.search_images, name="search_images"),
     path("search-videos/", media_search_views.search_videos, name="search_videos"),
+    
+    # Translation endpoints
+    path("translate/", translate_view.translate_view, name="translate"),
+    path("translate/status/", translate_view.translate_status_view, name="translate_status"),
 
     
     # Health check

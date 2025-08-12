@@ -82,8 +82,17 @@ const ResponsePage: React.FC = () => {
     mode?: 'textbook' | 'detailed' | 'advanced';
     used_mode?: 'textbook' | 'detailed' | 'advanced';
     mode_notes?: string;
+    // Translation state
+    id?: string;
+    language?: 'en' | 'ar';
+    originalText?: string;
+    translatedText?: string;
+    translatedTo?: 'en' | 'ar';
+    showTranslation?: boolean;
   }
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  const [autoTranslateToArabic, setAutoTranslateToArabic] = useState<boolean>(false);
+  const [translationAvailable, setTranslationAvailable] = useState<boolean>(false);
   const leftPaneRef = useRef<HTMLDivElement | null>(null);
   const [isAutoScroll, setIsAutoScroll] = useState(true);
 
@@ -91,6 +100,14 @@ const ResponsePage: React.FC = () => {
   const [showFullChapterModal, setShowFullChapterModal] = useState(false);
   const [showSummaryModal, setShowSummaryModal] = useState(false);
   const [chapterContent, setChapterContent] = useState<string>('');
+  // Suggested Questions translation state
+  const [sqTranslating, setSqTranslating] = useState(false);
+  const [sqShowTranslation, setSqShowTranslation] = useState(false);
+  const [sqTranslated, setSqTranslated] = useState<string[] | null>(null);
+  // Summary translation state (ResponsePage modal)
+  const [rspSummaryTranslating, setRspSummaryTranslating] = useState(false);
+  const [rspSummaryShowTranslation, setRspSummaryShowTranslation] = useState(false);
+  const [rspSummaryTranslated, setRspSummaryTranslated] = useState<string[] | null>(null);
 
   const images = {
     main: '/media/main.png',
@@ -99,6 +116,16 @@ const ResponsePage: React.FC = () => {
 
   // Initialize response and explanation type from URL
   useEffect(() => {
+    // Check translation provider availability
+    (async () => {
+      try {
+        const res = await axios.get(`http://localhost:8000/api/core/translate/status/`);
+        setTranslationAvailable(!!res.data?.configured);
+      } catch {
+        setTranslationAvailable(false);
+      }
+    })();
+
     if (location.state?.response) {
       const initial = location.state.response;
       setResponse(initial);
@@ -123,10 +150,10 @@ const ResponsePage: React.FC = () => {
         if (prev.length > 0) return prev;
         const seeded: ChatMessage[] = [];
         if (initial?.query) {
-          seeded.push({ role: 'user', content: initial.query });
+          seeded.push({ role: 'user', content: initial.query, language: detectLang(initial?.query) });
         }
         if (initial?.answer) {
-          seeded.push({ role: 'assistant', content: initial.answer, used_mode: (initial.used_mode as any) });
+          seeded.push({ role: 'assistant', content: initial.answer, used_mode: (initial.used_mode as any), language: 'en', originalText: initial.answer });
         }
         return seeded;
       });
@@ -271,7 +298,7 @@ const ResponsePage: React.FC = () => {
     setSessionPartial('');
     setMicState('processing');
     try {
-      setIsLoading(true);
+    setIsLoading(true);
       // Build history: existing chat + session so far + this user turn
       const tempHistory = [...chatHistory, ...[...sessionTurns, userTurn]];
       const chatResponse = await axios.post(`http://localhost:8000/api/core/chat/`, {
@@ -507,9 +534,21 @@ const ResponsePage: React.FC = () => {
 
       const { answer, suggested_questions, level, used_mode, mode_notes } = chatResponse.data || {};
 
-      // Append assistant reply to chat
+      // Append assistant reply to chat, with optional auto-translate to AR
       if (answer) {
-        setChatHistory((prev) => [...prev, { role: 'assistant', content: answer, used_mode, mode_notes }]);
+        const assistantMsg: ChatMessage = { role: 'assistant', content: answer, used_mode, mode_notes, originalText: answer, language: 'en' };
+        if (translationAvailable && autoTranslateToArabic) {
+          try {
+            // Optimistically add then update after translation
+            setChatHistory((prev) => [...prev, { ...assistantMsg, showTranslation: true, translatedText: '...', translatedTo: 'ar' }]);
+            const { text } = await translateText(answer, 'ar', 'en');
+            setChatHistory((prev) => prev.map((m, i) => i === prev.length - 1 ? { ...m, translatedText: text, translatedTo: 'ar', showTranslation: true } : m));
+          } catch {
+            setChatHistory((prev) => [...prev, assistantMsg]);
+          }
+        } else {
+          setChatHistory((prev) => [...prev, assistantMsg]);
+        }
       }
 
       // Keep legacy response object in sync (for existing UI pieces)
@@ -674,6 +713,81 @@ const ResponsePage: React.FC = () => {
     }
   };
 
+  // Language utils (function declarations are hoisted, safe for earlier use in render/effects)
+  function isArabic(text: string): boolean {
+    return /[\u0600-\u06FF]/.test(text);
+  }
+  function detectLang(text?: string): 'en' | 'ar' {
+    return text && isArabic(text) ? 'ar' : 'en';
+  }
+
+  const translateText = async (text: string, target: 'en' | 'ar', source?: 'en' | 'ar') => {
+    try {
+      const resp = await axios.post(`http://localhost:8000/api/core/translate/`, {
+        text,
+        sourceLang: source,
+        targetLang: target,
+      }, { timeout: 30000 });
+      if (resp.data?.success) {
+        return { text: resp.data.translatedText as string, detected: (resp.data.sourceLangDetected as 'en' | 'ar') };
+      }
+      throw new Error(resp.data?.error || 'Translation failed');
+    } catch (e: any) {
+      throw new Error(e?.message || 'Translation error');
+    }
+  };
+
+  const translateArray = async (items: string[], target: 'en' | 'ar', source?: 'en' | 'ar') => {
+    const results: string[] = [];
+    for (const item of items) {
+      try {
+        const { text } = await (async () => {
+          const resp = await axios.post(`http://localhost:8000/api/core/translate/`, { text: item, sourceLang: source, targetLang: target }, { timeout: 15000 });
+          if (resp.data?.success) return { text: resp.data.translatedText as string };
+          return { text: item };
+        })();
+        results.push(text);
+      } catch {
+        results.push(item);
+      }
+    }
+    return results;
+  };
+
+  const handleToggleTranslation = async (index: number) => {
+    const msg = chatHistory[index];
+    if (!msg || msg.role !== 'assistant') return;
+    const visible = msg.showTranslation;
+    const currentLang = msg.language || detectLang(msg.content);
+    const target = currentLang === 'en' ? 'ar' : 'en';
+    const baseText = msg.originalText || msg.content;
+
+    // If we already have translation and toggling view only
+    if (msg.translatedText && msg.translatedTo === target) {
+      setChatHistory(prev => prev.map((m, i) => i === index ? { ...m, showTranslation: !visible } : m));
+      return;
+    }
+
+    // Show loading skeleton by temporarily setting placeholder
+    setChatHistory(prev => prev.map((m, i) => i === index ? { ...m, translatedText: '...', translatedTo: target, showTranslation: true } : m));
+    try {
+      const { text, detected } = await translateText(baseText, target, currentLang);
+      setChatHistory(prev => prev.map((m, i) => i === index ? {
+        ...m,
+        language: detected as any,
+        originalText: baseText,
+        translatedText: text,
+        translatedTo: target,
+        showTranslation: true,
+      } : m));
+    } catch (e) {
+      // On failure, revert view but keep original
+      setChatHistory(prev => prev.map((m, i) => i === index ? { ...m, showTranslation: false } : m));
+      setError('Translation unavailable. View original.');
+      setTimeout(() => setError(null), 3000);
+    }
+  };
+
   // Handle View Full Chapter
   const handleViewFullChapter = async () => {
     if (!response) return;
@@ -834,6 +948,18 @@ const ResponsePage: React.FC = () => {
               </svg>
             </div>
 
+            {/* Auto-translate to Arabic toggle */}
+            {translationAvailable && (
+              <label className="flex items-center gap-2 bg-white rounded-full px-3 py-1 border border-gray-200 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={autoTranslateToArabic}
+                  onChange={(e) => setAutoTranslateToArabic(e.target.checked)}
+                />
+                <span className="text-sm text-gray-700">Auto-translate to Arabic</span>
+              </label>
+            )}
+
             {/* User Profile */}
             <div className="flex items-center gap-x-2">
               <img
@@ -900,7 +1026,7 @@ const ResponsePage: React.FC = () => {
           >
             {/* Question Header */}
             <div className="mb-6">
-              <div className="flex items-center gap-4 mb-3">
+                <div className="flex items-center gap-4 mb-3">
                 {isEditing ? (
                   <div className="flex items-center gap-2 flex-1">
                     <input
@@ -926,17 +1052,17 @@ const ResponsePage: React.FC = () => {
                   </div>
                 ) : (
                   <>
-                    <h1 className="text-2xl font-bold">{displayQuery}</h1>
+                  <h1 className="text-2xl font-bold">{displayQuery}</h1>
                     <button 
                       onClick={handleEditQuery}
                       className="p-2 -mr-2 rounded-full hover:bg-gray-100" 
                       title="Edit query"
                     >
                       <Edit3 className="w-5 h-5 text-gray-600" />
-                    </button>
+                  </button>
                   </>
                 )}
-              </div>
+                </div>
               
               <div className="flex items-center justify-between mt-2">
                 <div className="flex items-center gap-2">
@@ -1007,8 +1133,8 @@ const ResponsePage: React.FC = () => {
                     <option>Detailed Explanation</option>
                     <option>Advanced Explanation</option>
                   </select>
+                    </div>
                 </div>
-              </div>
               <div className="border-b border-gray-200 mt-4"></div> {/* Underline */}
             </div>
 
@@ -1046,17 +1172,17 @@ const ResponsePage: React.FC = () => {
                         </div>
                       ) : (
                         <div 
-                          className="lesson-content answer-text text-base leading-7 text-gray-700"
+                          className={`lesson-content answer-text text-base leading-7 ${msg.showTranslation && (msg.translatedTo === 'ar') ? 'text-gray-800' : 'text-gray-700'}`}
                           onMouseUp={handleTextSelection}
                           onTouchEnd={handleTextSelection}
                           style={{ userSelect: 'text' }}
                         >
                           {isLoading && idx === chatHistory.length - 1 ? (
-                            <div className="flex items-center gap-3">
-                              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
-                              <span>Generating {explanationType.toLowerCase()}...</span>
-                            </div>
-                          ) : (
+                  <div className="flex items-center gap-3">
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                    <span>Generating {explanationType.toLowerCase()}...</span>
+                  </div>
+                ) : (
                             <>
                               <div className="flex items-center gap-2 mb-2">
                                 {msg.used_mode && (
@@ -1064,9 +1190,31 @@ const ResponsePage: React.FC = () => {
                                 )}
                                 {msg.mode_notes && (
                                   <span className="text-[10px] text-amber-700 bg-amber-100 rounded px-2 py-0.5">{msg.mode_notes}</span>
-                                )}
+                )}
+                                {/* Translation badge and toggle */}
+                                {(() => {
+                                  const currentLang = msg.language || detectLang(msg.content);
+                                  const isAR = msg.showTranslation ? (msg.translatedTo === 'ar') : (currentLang === 'ar');
+                                  const pill = msg.showTranslation ? (msg.translatedTo === 'ar' ? 'Translated from EN' : 'Translated from AR') : undefined;
+                                  return (
+                                    <div className="ml-auto flex items-center gap-2">
+                                      {pill && (
+                                        <span className="text-[10px] uppercase tracking-wide text-purple-700 bg-purple-100 rounded px-2 py-0.5">{pill}</span>
+                                      )}
+                                      <button
+                                        onClick={() => handleToggleTranslation(idx)}
+                                        className="text-xs px-2 py-0.5 border rounded hover:bg-gray-50"
+                                        title={isAR ? 'Translate to English' : 'Translate to Arabic'}
+                                      >
+                                        {isAR ? 'Translate to English' : 'Translate to Arabic'}
+                                      </button>
+                                    </div>
+                                  );
+                                })()}
+              </div>
+                              <div dir={(msg.showTranslation && msg.translatedTo === 'ar') ? 'rtl' : 'ltr'} className={(msg.showTranslation && msg.translatedTo === 'ar') ? 'text-right' : 'text-left'}>
+                                {msg.showTranslation ? (msg.translatedText || '') : msg.content}
                               </div>
-                              {msg.content}
                             </>
                           )}
                         </div>
@@ -1077,21 +1225,21 @@ const ResponsePage: React.FC = () => {
               )}
               <div className="flex items-center justify-between mt-6">
                 <div className="flex items-center gap-4">
-                  <button 
+                <button 
                     onClick={handleShare}
-                    className={`flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    disabled={isLoading}
-                  >
-                    <Share2 className="w-4 h-4" />
-                    Share
-                  </button>
-                  <button 
+                  className={`flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  disabled={isLoading}
+                >
+                  <Share2 className="w-4 h-4" />
+                  Share
+                </button>
+                <button 
                     onClick={handleRewrite}
-                    className={`flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    disabled={isLoading}
-                  >
-                    <RefreshCw className="w-4 h-4" />
-                    Rewrite
+                  className={`flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  disabled={isLoading}
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  Rewrite
                   </button>
                   <button 
                     onClick={handleCopyToClipboard}
@@ -1116,12 +1264,12 @@ const ResponsePage: React.FC = () => {
                         </button>
                         <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
                           Report Issue
-                        </button>
+                </button>
                       </div>
                     )}
-                  </div>
-                </div>
-                
+              </div>
+            </div>
+
                 {/* Rating Section */}
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-gray-500">Rate this answer:</span>
@@ -1142,9 +1290,35 @@ const ResponsePage: React.FC = () => {
             </div>
 
             {/* Suggested Questions (click-to-input) */}
-            {(response.suggested_questions && response.suggested_questions.length > 0) || isLoading ? (
+              {(response.suggested_questions && response.suggested_questions.length > 0) || isLoading ? (
               <div className="mb-8">
-                <h3 className="text-lg font-semibold mb-4">Suggested Questions</h3>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold">Suggested Questions</h3>
+                  {response.suggested_questions && response.suggested_questions.length > 0 && (
+                    <button
+                      onClick={async () => {
+                        if (sqTranslating) return;
+                        try {
+                          setSqTranslating(true);
+                          if (!sqShowTranslation) {
+                            const translated = await translateArray(response.suggested_questions, 'ar', 'en');
+                            setSqTranslated(translated);
+                            setSqShowTranslation(true);
+                          } else {
+                            setSqShowTranslation(false);
+                          }
+                        } finally {
+                          setSqTranslating(false);
+                        }
+                      }}
+                      title={sqShowTranslation ? 'View EN' : 'View AR'}
+                      className="text-xs px-2 py-1 border rounded hover:bg-gray-50 disabled:opacity-50"
+                      disabled={sqTranslating}
+                    >
+                      {sqShowTranslation ? 'AR→EN' : 'EN→AR'}
+                    </button>
+                  )}
+                </div>
                 <div className={`border-t border-gray-200 divide-y divide-gray-200 ${isLoading ? 'opacity-50' : ''}`}>
                   {isLoading ? (
                     <div className="py-3 flex items-center gap-3">
@@ -1152,7 +1326,7 @@ const ResponsePage: React.FC = () => {
                       <span className="text-gray-600">Loading new questions...</span>
                     </div>
                   ) : (
-                    response.suggested_questions.map((question: string, index: number) => (
+                    (sqShowTranslation && sqTranslated ? sqTranslated : response.suggested_questions).map((question: string, index: number) => (
                       <button
                         key={index}
                         onClick={() => {
@@ -1162,6 +1336,7 @@ const ResponsePage: React.FC = () => {
                           focusMainInput();
                         }}
                         className="w-full text-left py-3 px-0 text-gray-700 hover:bg-gray-50 transition-colors"
+                        dir={sqShowTranslation ? 'rtl' : 'ltr'}
                       >
                         {question}
                       </button>
@@ -1219,10 +1394,10 @@ const ResponsePage: React.FC = () => {
                         </div>
                         
                         {/* Input field inside */}
-                        <input
-                          type="text"
-                          value={followUpQuery}
-                          onChange={(e) => setFollowUpQuery(e.target.value)}
+                <input
+                  type="text"
+                  value={followUpQuery}
+                  onChange={(e) => setFollowUpQuery(e.target.value)}
                           onKeyDown={(e) => e.key === 'Enter' && handleFollowUpSubmit()}
                           placeholder="Ask anything"
                           className="w-full border-none outline-none text-gray-700 placeholder-gray-400 mr-16"
@@ -1235,7 +1410,7 @@ const ResponsePage: React.FC = () => {
                         value={followUpQuery}
                         onChange={(e) => setFollowUpQuery(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleFollowUpSubmit()}
-                        placeholder="Ask follow-up"
+                  placeholder="Ask follow-up"
                         className="w-full px-4 py-3 pr-12 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                       />
                     )}
@@ -1307,14 +1482,14 @@ const ResponsePage: React.FC = () => {
                       >
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
                       </svg>
-                    ) : (
-                      <img
-                        src="/media/button logo.png"
-                        alt="Voice Mode"
-                        className="w-8 h-8 object-contain"
-                      />
-                    )}
-                  </button>
+                  ) : (
+                    <img
+                      src="/media/button logo.png"
+                      alt="Voice Mode"
+                      className="w-8 h-8 object-contain"
+                    />
+                  )}
+                </button>
                 </div>
               </div>
             </div>
@@ -1382,7 +1557,7 @@ const ResponsePage: React.FC = () => {
           id="full-chapter-modal" 
           className="relative bg-white rounded-lg shadow-xl w-full max-w-5xl h-[85vh] flex flex-col animate-scale-in textbook-page-shadow"
         >
-          {/* Modal Header */}
+           {/* Modal Header */}
           <div className="bg-gradient-to-r from-[#007bff] to-[#6f42c1] text-white p-8 rounded-t-lg flex items-center justify-between">
             <div className="flex items-center space-x-4">
               <BookOpen size={32} className="text-white" />
@@ -1391,7 +1566,30 @@ const ResponsePage: React.FC = () => {
                 <p className="text-sm text-white/80 mt-1">Chapter: {getChapterTitle(response?.query || '')}</p>
               </div>
             </div>
-            <div className="flex items-center space-x-4">
+             <div className="flex items-center space-x-2">
+               <button
+                 onClick={async () => {
+                   if (rspSummaryTranslating) return;
+                   try {
+                     setRspSummaryTranslating(true);
+                     const summaryItems = generateSummary(response?.answer || '');
+                     if (!rspSummaryShowTranslation) {
+                       const translated = await translateArray(summaryItems, 'ar', 'en');
+                       setRspSummaryTranslated(translated);
+                       setRspSummaryShowTranslation(true);
+                     } else {
+                       setRspSummaryShowTranslation(false);
+                     }
+                   } finally {
+                     setRspSummaryTranslating(false);
+                   }
+                 }}
+                 title={rspSummaryShowTranslation ? 'View EN' : 'View AR'}
+                 className="text-xs px-2 py-1 border rounded bg-white/10 hover:bg-white/20 disabled:opacity-50"
+                 disabled={rspSummaryTranslating}
+               >
+                {rspSummaryShowTranslation ? 'AR→EN' : 'EN→AR'}
+               </button>
               <button 
                 onClick={() => setShowFullChapterModal(false)} 
                 className="p-3 rounded-full hover:bg-white/20 transition-colors"
@@ -1421,28 +1619,53 @@ const ResponsePage: React.FC = () => {
           <div className="flex items-center justify-between p-6 border-b border-gray-200">
             <div className="flex items-center gap-3">
               <BookOpen className="w-6 h-6 text-gray-700" />
-              <h2 className="text-xl font-semibold text-gray-800">Answer Summary</h2>
+              <h2 className="text-xl font-semibold text-gray-800">{rspSummaryShowTranslation ? 'ملخص الإجابة' : 'Answer Summary'}</h2>
             </div>
-            <button
-              onClick={() => setShowSummaryModal(false)}
-              className="p-2 hover:bg-gray-100 rounded-full transition-colors"
-            >
-              <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={async () => {
+                  if (rspSummaryTranslating) return;
+                  try {
+                    setRspSummaryTranslating(true);
+                    const items = generateSummary(response?.answer || '');
+                    if (!rspSummaryShowTranslation) {
+                      const translated = await translateArray(items, 'ar', 'en');
+                      setRspSummaryTranslated(translated);
+                      setRspSummaryShowTranslation(true);
+                    } else {
+                      setRspSummaryShowTranslation(false);
+                    }
+                  } finally {
+                    setRspSummaryTranslating(false);
+                  }
+                }}
+                    title={rspSummaryShowTranslation ? 'View EN' : 'View AR'}
+                    className="text-xs px-2 py-1 border rounded hover:bg-gray-50 disabled:opacity-50"
+                    disabled={rspSummaryTranslating}
+                  >
+                    {rspSummaryShowTranslation ? 'AR→EN' : 'EN→AR'}
+                  </button>
+              <button
+                onClick={() => setShowSummaryModal(false)}
+                className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+              >
+                <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
           </div>
           
           {/* Modal Content */}
           <div className="p-6">
             <div className="bg-[#F8F7F0] rounded-lg p-4 mb-4">
-              <h3 className="font-medium text-gray-800 mb-3 flex items-center gap-2">
+              <h3 className="font-medium text-gray-800 mb-3 flex items-center gap-2" dir={rspSummaryShowTranslation ? 'rtl' : 'ltr'}>
                 <span className="w-2 h-2 bg-gray-600 rounded-full"></span>
-                Key Takeaways
+                {rspSummaryShowTranslation ? 'أهم النقاط' : 'Key Takeaways'}
               </h3>
               <ul className="space-y-2">
-                {generateSummary(response?.answer || '').map((point, index) => (
-                  <li key={index} className="flex items-start gap-3 text-gray-700">
+                {(rspSummaryShowTranslation && rspSummaryTranslated ? rspSummaryTranslated : generateSummary(response?.answer || '')).map((point, index) => (
+                  <li key={index} className="flex items-start gap-3 text-gray-700" dir={rspSummaryShowTranslation ? 'rtl' : 'ltr'}>
                     <span className="w-1.5 h-1.5 bg-gray-500 rounded-full mt-2 flex-shrink-0"></span>
                     <span 
                       className="leading-relaxed lesson-content"
@@ -1457,12 +1680,12 @@ const ResponsePage: React.FC = () => {
               </ul>
             </div>
             
-            <div className="flex justify-end">
+              <div className="flex justify-end">
               <button
                 onClick={() => setShowSummaryModal(false)}
                 className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700 transition-colors"
               >
-                Close
+                  {rspSummaryShowTranslation ? 'إغلاق' : 'Close'}
               </button>
             </div>
           </div>

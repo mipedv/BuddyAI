@@ -44,6 +44,21 @@ const MainContent: React.FC<MainContentProps> = ({
   const [showTextBookModal, setShowTextBookModal] = useState(false);
   const [showFullChapterModal, setShowFullChapterModal] = useState(false);
   const [showSummaryModal, setShowSummaryModal] = useState(false);
+  // Translation helpers/state
+  const isArabic = (text: string) => /[\u0600-\u06FF]/.test(text);
+  const translateText = async (text: string, target: 'en' | 'ar', source?: 'en' | 'ar') => {
+    try {
+      const resp = await axios.post(`http://localhost:8000/api/core/translate/`, {
+        text,
+        sourceLang: source,
+        targetLang: target,
+      }, { timeout: 15000 });
+      if (resp.data?.success) return resp.data.translatedText as string;
+      return text;
+    } catch {
+      return text;
+    }
+  };
 
   const TOPIC_SPECIFIC_SUGGESTED_TOPICS = {
     'Solar System': [
@@ -89,8 +104,10 @@ const MainContent: React.FC<MainContentProps> = ({
     setLoading(true);
     setError(null);
     try {
+      // If user asked in Arabic, pre-translate to English for the backend
+      const queryForBackend = isArabic(searchQuery) ? await translateText(searchQuery, 'en', 'ar') : searchQuery;
       const response = await axios.get(`http://localhost:8000/api/core/get-answer/`, {
-        params: { query: searchQuery, level }
+        params: { query: queryForBackend, level }
       });
       // Navigate with state, so ResponsePage gets the data directly
       navigate(`/response?query=${encodeURIComponent(searchQuery)}&level=${level}`, { state: { response: response.data } });
@@ -133,6 +150,37 @@ const MainContent: React.FC<MainContentProps> = ({
   const handleViewSummary = () => {
     console.log('Opening Solar System Summary Modal');
     setShowSummaryModal(true);
+  };
+
+  // Summary translation state
+  const [summaryTranslating, setSummaryTranslating] = useState(false);
+  const [summaryShowTranslation, setSummaryShowTranslation] = useState(false);
+  const [summaryTranslatedItems, setSummaryTranslatedItems] = useState<string[] | null>(null);
+
+  const baseSummaryItems: string[] = [
+    'The Solar System consists of the Sun at its center and all celestial bodies that orbit around it',
+    'Eight planets orbit the Sun: Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus, and Neptune',
+    "The Sun provides light and energy to all planets and makes up 99.86% of the system's mass",
+    'Planets are divided into terrestrial (rocky) and gas giants (Jupiter, Saturn, Uranus, Neptune)',
+    'Other objects include dwarf planets, asteroids in the asteroid belt, and comets with icy compositions',
+    'The Solar System formed approximately 4.6 billion years ago from a giant cloud of gas and dust',
+    'Gravity keeps all objects in orbit around the Sun, following elliptical paths',
+  ];
+
+  const handleTranslateSummary = async () => {
+    try {
+      setSummaryTranslating(true);
+      if (!summaryShowTranslation) {
+        // Translate to Arabic
+        const translated = await Promise.all(baseSummaryItems.map(t => translateText(t, 'ar', 'en')));
+        setSummaryTranslatedItems(translated);
+        setSummaryShowTranslation(true);
+      } else {
+        setSummaryShowTranslation(false);
+      }
+    } finally {
+      setSummaryTranslating(false);
+    }
   };
 
   return (
@@ -533,53 +581,26 @@ const MainContent: React.FC<MainContentProps> = ({
             {/* Modal Body */}
             <div className="flex-1 overflow-auto p-6">
               <div className="bg-[#F8F7F0] rounded-lg p-4 mb-4">
-                <h3 className="font-medium text-gray-800 mb-3 flex items-center gap-2">
-                  <span className="w-2 h-2 bg-gray-600 rounded-full"></span>
-                  Solar System Chapter Summary
-                </h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-medium text-gray-800 flex items-center gap-2">
+                    <span className="w-2 h-2 bg-gray-600 rounded-full"></span>
+                    Solar System Chapter Summary
+                  </h3>
+                  <button
+                    onClick={handleTranslateSummary}
+                    className="text-xs px-2 py-1 border rounded hover:bg-gray-50 disabled:opacity-50"
+                    disabled={summaryTranslating}
+                  >
+                    {summaryShowTranslation ? 'View Original' : 'Translate to Arabic'}
+                  </button>
+                </div>
                 <ul className="space-y-2">
-                  <li className="flex items-start gap-3 text-gray-700">
-                    <span className="w-1.5 h-1.5 bg-gray-500 rounded-full mt-2 flex-shrink-0"></span>
-                    <span className="leading-relaxed">
-                      The Solar System consists of the Sun at its center and all celestial bodies that orbit around it
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-3 text-gray-700">
-                    <span className="w-1.5 h-1.5 bg-gray-500 rounded-full mt-2 flex-shrink-0"></span>
-                    <span className="leading-relaxed">
-                      Eight planets orbit the Sun: Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus, and Neptune
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-3 text-gray-700">
-                    <span className="w-1.5 h-1.5 bg-gray-500 rounded-full mt-2 flex-shrink-0"></span>
-                    <span className="leading-relaxed">
-                      The Sun provides light and energy to all planets and makes up 99.86% of the system's mass
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-3 text-gray-700">
-                    <span className="w-1.5 h-1.5 bg-gray-500 rounded-full mt-2 flex-shrink-0"></span>
-                    <span className="leading-relaxed">
-                      Planets are divided into terrestrial (rocky) and gas giants (Jupiter, Saturn, Uranus, Neptune)
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-3 text-gray-700">
-                    <span className="w-1.5 h-1.5 bg-gray-500 rounded-full mt-2 flex-shrink-0"></span>
-                    <span className="leading-relaxed">
-                      Other objects include dwarf planets, asteroids in the asteroid belt, and comets with icy compositions
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-3 text-gray-700">
-                    <span className="w-1.5 h-1.5 bg-gray-500 rounded-full mt-2 flex-shrink-0"></span>
-                    <span className="leading-relaxed">
-                      The Solar System formed approximately 4.6 billion years ago from a giant cloud of gas and dust
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-3 text-gray-700">
-                    <span className="w-1.5 h-1.5 bg-gray-500 rounded-full mt-2 flex-shrink-0"></span>
-                    <span className="leading-relaxed">
-                      Gravity keeps all objects in orbit around the Sun, following elliptical paths
-                    </span>
-                  </li>
+                  {(summaryShowTranslation && summaryTranslatedItems ? summaryTranslatedItems : baseSummaryItems).map((item, idx) => (
+                    <li key={idx} className="flex items-start gap-3 text-gray-700" dir={summaryShowTranslation ? 'rtl' : 'ltr'}>
+                      <span className="w-1.5 h-1.5 bg-gray-500 rounded-full mt-2 flex-shrink-0"></span>
+                      <span className="leading-relaxed {summaryShowTranslation ? 'text-right' : ''}">{item}</span>
+                    </li>
+                  ))}
                 </ul>
               </div>
               
