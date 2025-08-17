@@ -158,6 +158,11 @@ class LLMTranslator(TranslatorProviderBase):
         self._llm = None
 
     def is_configured(self) -> bool:
+        print(f"🔍 LLM Translator Configuration Check:")
+        print(f"API Key Present: {bool(self.api_key)}")
+        print(f"ChatOpenAI Available: {ChatOpenAI is not None}")
+        print(f"Base URL: {self.base_url}")
+        print(f"Model: {self.model}")
         return bool(self.api_key) and ChatOpenAI is not None
 
     def _get_client(self):

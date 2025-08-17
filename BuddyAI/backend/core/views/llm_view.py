@@ -1,157 +1,159 @@
 # llm_view.py
+import json
 from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
-from core.services import llm_service
+from django.views.decorators.csrf import csrf_exempt
+from core.services.llm_service import llm_service
 
 def get_answer(request):
     """
-    Handle GET requests to retrieve answers from the LLM service.
-    
-    Query Parameters:
-    - query: The user's question (required)
-    - level: Answer complexity level (textbook, detailed, advanced) - default: textbook
-    
-    Returns:
-    JSON response with answer and retrieved chunks
+    Get an answer for a given query with optional explanation level.
     """
-    # Get query parameters
-    query = request.GET.get("query")
-    level = request.GET.get("level", "textbook").strip()
-    
-    # Validate required parameters
+    query = request.GET.get('query', '')
+    level = request.GET.get('level', 'textbook')
+
     if not query:
         return JsonResponse({
-            "success": False,
-            "error": "Query parameter is required"
+            'success': False,
+            'error': 'No query provided'
         }, status=400)
-    
-    if not query.strip() or len(query.strip()) < 4:
-        return JsonResponse({
-            "success": False,
-            "error": "Query must be at least 4 characters long"
-        }, status=400)
-    
-    # Validate level parameter
-    valid_levels = ["textbook", "detailed", "advanced"]
-    if level not in valid_levels:
-        return JsonResponse({
-            "success": False,
-            "error": f"Invalid level. Must be one of: {', '.join(valid_levels)}"
-        }, status=400)
-    
+
     try:
-        # Retrieve relevant chunks
-        chunks = llm_service.retrieve_textbook_chunks(query)
+        # Use LLM service to generate answer
         
-        # Generate answer using the service
-        answer = llm_service.generate_answer(query, level)
+        # Add detailed logging
+        print(f"🔍 Generating answer for query: '{query}'")
+        print(f"🎯 Explanation level: {level}")
         
-        # Generate suggested questions
-        suggested_questions = llm_service.generate_suggested_questions(answer)
-        
-        # Prepare response
-        response_data = {
-            "success": True,
-            "query": query,
-            "level": level,
-            "answer": answer,
-            "chunks": [
-                {
-                    "content": chunk.page_content,
-                    "metadata": chunk.metadata if hasattr(chunk, 'metadata') else {}
-                }
-                for chunk in chunks
-            ],
-            "suggested_questions": [q for q in suggested_questions if q.strip()],
-            "num_chunks_retrieved": len(chunks)
-        }
-        
-        return JsonResponse(response_data)
-        
-    except Exception as e:
+        response = llm_service.get_chat_response(message=query, level=level)
+
+        # Add logging for response
+        print(f"✅ Answer generated successfully")
+        print(f"📝 Answer length: {len(response['answer'])} characters")
+        print(f"❓ Suggested questions: {response.get('suggested_questions', [])}")
+
         return JsonResponse({
-            "success": False,
-            "error": f"An error occurred while processing your request: {str(e)}"
+            'success': True,
+            'answer': response['answer'],
+            'suggested_questions': response.get('suggested_questions', []),
+            'level': level
+        })
+
+    except Exception as e:
+        # Detailed error logging
+        import traceback
+        print(f"❌ Error in get_answer: {e}")
+        print("🔍 Detailed error traceback:")
+        traceback.print_exc()
+        
+        return JsonResponse({
+            'success': False,
+            'error': f"An error occurred while processing your request: {str(e)}",
+            'details': traceback.format_exc()
         }, status=500)
 
-@csrf_exempt
-@require_http_methods(["POST"])
-def get_answer_post(request):
+
+def get_service_status(request):
     """
-    Handle POST requests to retrieve answers from the LLM service.
-    
-    Request Body (JSON):
-    {
-        "query": "What is the solar system?",
-        "level": "textbook",
-        "history": []
-    }
-    
-    Returns:
-    JSON response with answer and retrieved chunks
+    Get the current status of the LLM service.
     """
     try:
-        import json
-        data = json.loads(request.body)
-        
-        query = data.get("query")
-        level = data.get("level", "textbook")
-        history = data.get("history", [])
-        
-        # Validate required parameters
-        if not query:
-            return JsonResponse({
-                "success": False,
-                "error": "Query is required"
-            }, status=400)
-        
-        if not query.strip() or len(query.strip()) < 4:
-            return JsonResponse({
-                "success": False,
-                "error": "Query must be at least 4 characters long"
-            }, status=400)
-        
-        # Validate level parameter
-        valid_levels = ["textbook", "detailed", "advanced"]
-        if level not in valid_levels:
-            return JsonResponse({
-                "success": False,
-                "error": f"Invalid level. Must be one of: {', '.join(valid_levels)}"
-            }, status=400)
-        
-        # Get complete chat response
-        response = llm_service.get_chat_response(query, level, history)
-        
-        # Retrieve chunks for additional context
-        chunks = llm_service.retrieve_textbook_chunks(query)
-        
-        # Prepare response
-        response_data = {
-            "success": True,
-            "query": query,
-            "level": level,
-            "answer": response["answer"],
-            "suggested_questions": response["suggested_questions"],
-            "chunks": [
-                {
-                    "content": chunk.page_content,
-                    "metadata": chunk.metadata if hasattr(chunk, 'metadata') else {}
-                }
-                for chunk in chunks
-            ],
-            "num_chunks_retrieved": len(chunks)
-        }
-        
-        return JsonResponse(response_data)
-        
-    except json.JSONDecodeError:
-        return JsonResponse({
-            "success": False,
-            "error": "Invalid JSON in request body"
-        }, status=400)
+        status = llm_service.get_service_status()
+        return JsonResponse(status)
     except Exception as e:
+        print(f"❌ Error in get_service_status: {e}")
         return JsonResponse({
-            "success": False,
-            "error": f"An error occurred while processing your request: {str(e)}"
+            'success': False,
+            'error': f"An error occurred while fetching service status: {str(e)}"
+        }, status=500)
+
+
+@require_http_methods(["POST"])
+@csrf_exempt
+def chat(request):
+    """
+    Handle conversational chat with context preservation.
+    """
+    try:
+        data = json.loads(request.body)
+        message = data.get('message', '')
+        history = data.get('history', [])
+        level = data.get('level', 'detailed')
+
+        if not message:
+            return JsonResponse({
+                'success': False,
+                'error': 'No message provided'
+            }, status=400)
+
+        # Use LLM service to generate chat response
+        response = llm_service.get_chat_response(
+            message=message, 
+            level=level, 
+            history=history
+        )
+
+        return JsonResponse({
+            'success': True,
+            'answer': response['answer'],
+            'suggested_questions': response.get('suggested_questions', []),
+            'level': level
+        })
+
+    except Exception as e:
+        print(f"❌ Error in chat: {e}")
+        return JsonResponse({
+            'success': False,
+            'error': f"An error occurred while processing your request: {str(e)}"
+        }, status=500) 
+
+@require_http_methods(["POST"])
+@csrf_exempt
+def rewrite_answer(request):
+    """
+    Rewrite a previous answer with a specific mode.
+    Supports regenerating the last answer or a specific turn's answer.
+    """
+    try:
+        data = json.loads(request.body)
+        user_prompt = data.get('user_prompt')
+        mode = data.get('mode', 'textbook')
+        conversation_context = data.get('conversation_context', [])
+        turn_index = data.get('turn_index', -1)  # -1 means last turn
+
+        # Validate inputs
+        if not user_prompt:
+            return JsonResponse({
+                'success': False, 
+                'error': 'User prompt is required'
+            }, status=400)
+
+        # Use LLM service to generate answer
+        
+        # If turn_index is specified, use that context
+        if turn_index != -1 and turn_index < len(conversation_context):
+            context_for_turn = conversation_context[:turn_index+1]
+        else:
+            context_for_turn = conversation_context
+
+        # Generate new answer
+        response = llm_service.get_chat_response(
+            message=user_prompt, 
+            level=mode, 
+            history=context_for_turn
+        )
+
+        return JsonResponse({
+            'success': True,
+            'answer': response['answer'],
+            'suggested_questions': response.get('suggested_questions', []),
+            'mode': mode,
+            'turn_index': turn_index
+        })
+
+    except Exception as e:
+        print(f"❌ Error in rewrite_answer: {e}")
+        return JsonResponse({
+            'success': False, 
+            'error': str(e)
         }, status=500) 

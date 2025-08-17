@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Share2, Search, Video, RefreshCw, FileText, BookOpen, Edit3, ThumbsUp, ThumbsDown, Copy, MoreHorizontal, X } from 'lucide-react';
 import AskBuddyAIButton from './AskBuddyAIButton';
@@ -46,6 +46,7 @@ const ResponsePage: React.FC = () => {
   const [explanationType, setExplanationType] = useState('Textbook Explanation');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isRewriting, setIsRewriting] = useState<{ [key: number]: boolean }>({}); // Add isRewriting state
 
   // Input and query states
   const [followUpQuery, setFollowUpQuery] = useState('');
@@ -108,6 +109,68 @@ const ResponsePage: React.FC = () => {
   const [rspSummaryTranslating, setRspSummaryTranslating] = useState(false);
   const [rspSummaryShowTranslation, setRspSummaryShowTranslation] = useState(false);
   const [rspSummaryTranslated, setRspSummaryTranslated] = useState<string[] | null>(null);
+
+  // All useCallback hooks MUST be declared here, before any conditional logic
+  const handleRewrite = useCallback(async (index: number) => {
+    // Prevent multiple simultaneous rewrites
+    if (isRewriting[index]) return;
+
+    // Create a copy of the current chat history
+    const updatedHistory = [...chatHistory];
+    
+    try {
+      // Start rewriting for this specific message
+      setIsRewriting(prev => ({ ...prev, [index]: true }));
+
+      // Find the corresponding user message
+      const userMessage = updatedHistory.slice(0, index).reverse()
+        .find(msg => msg.role === 'user');
+
+      if (!userMessage) {
+        console.error('No user message found for rewrite');
+        return;
+      }
+
+      // Call backend rewrite endpoint
+      const response = await axios.post('/api/core/rewrite-answer/', {
+        user_prompt: userMessage.content,
+        mode: explanationType,
+        conversation_context: updatedHistory.slice(0, index),
+        turn_index: index
+      });
+
+      // Update the specific assistant message
+      if (response.data.success) {
+        updatedHistory[index] = {
+          role: 'assistant',
+          content: response.data.answer,
+          mode: explanationType
+        };
+
+        setChatHistory(updatedHistory);
+      }
+    } catch (error) {
+      console.error('Error rewriting answer:', error);
+    } finally {
+      // Stop rewriting for this message
+      setIsRewriting(prev => {
+        const updated = { ...prev };
+        delete updated[index];
+        return updated;
+      });
+    }
+  }, [chatHistory, explanationType, isRewriting]);
+
+  const handleModeChange = useCallback(async () => {
+    // If there's a last assistant message, rewrite it
+    const lastAssistantIndex = chatHistory.reduceRight((foundIndex, msg, index) => {
+      return msg.role === 'assistant' && foundIndex === -1 ? index : foundIndex;
+    }, -1);
+
+    if (lastAssistantIndex !== -1) {
+      await handleRewrite(lastAssistantIndex);
+    }
+  }, [chatHistory, handleRewrite]);
 
   const images = {
     main: '/media/main.png',
@@ -206,6 +269,11 @@ const ResponsePage: React.FC = () => {
     };
   }, [showMoreOptions, showHighlightPopup, isInputExpanded]);
 
+  // Keep draft mode aligned with current selector value; this does not trigger any request
+  useEffect(() => {
+    setDraftMode(getLevelForBackend(explanationType) as 'textbook' | 'detailed' | 'advanced');
+  }, [explanationType]);
+
   // Auto-scroll controller: keep bottom unless user scrolls up
   useEffect(() => {
     const container = leftPaneRef.current;
@@ -214,11 +282,6 @@ const ResponsePage: React.FC = () => {
       container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
     }
   }, [chatHistory, isAutoScroll]);
-
-  // Keep draft mode aligned with current selector value; this does not trigger any request
-  useEffect(() => {
-    setDraftMode(getLevelForBackend(explanationType) as 'textbook' | 'detailed' | 'advanced');
-  }, [explanationType]);
 
   if (!response) {
     return (
@@ -665,35 +728,7 @@ const ResponsePage: React.FC = () => {
     }
   };
 
-  // Function to handle rewrite
-  const handleRewrite = async () => {
-    if (!response?.query || isLoading) return;
 
-    setIsLoading(true);
-    setError(null);
-    
-    try {
-      const apiResponse = await axios.get(`http://localhost:8000/api/core/get-answer/`, {
-        params: {
-          query: response.query,
-          level: getLevelForBackend(explanationType)
-        }
-      });
-
-      // Update the response with new data
-      setResponse({
-        ...response,
-        answer: apiResponse.data.answer,
-        suggested_questions: apiResponse.data.suggested_questions,
-      });
-
-    } catch (err: any) {
-      console.error('Error rewriting answer:', err);
-      setError(err.response?.data?.error || 'Failed to rewrite answer. Please try again.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   // Function to handle rating
   const handleRating = (type: 'up' | 'down') => {
@@ -1234,7 +1269,7 @@ const ResponsePage: React.FC = () => {
                   Share
                 </button>
                 <button 
-                    onClick={handleRewrite}
+                    onClick={() => handleRewrite(chatHistory.length - 1)}
                   className={`flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
                   disabled={isLoading}
                 >

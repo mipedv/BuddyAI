@@ -42,9 +42,15 @@ class LLMService:
     
     def _validate_environment(self):
         """Validate required environment variables."""
-        self.openai_api_key = os.getenv('OPENAI_API_KEY')
+        # Try LLM Translator key first
+        self.openai_api_key = os.getenv('LLM_TRANSLATOR_API_KEY')
+        
+        # If LLM Translator key is not set, try OpenAI key
         if not self.openai_api_key:
-            raise ValueError("OPENAI_API_KEY not found in environment!")
+            self.openai_api_key = os.getenv('OPENAI_API_KEY')
+        
+        if not self.openai_api_key:
+            raise ValueError("No API key found for LLM. Please set LLM_TRANSLATOR_API_KEY or OPENAI_API_KEY.")
     
     def _initialize_core_components(self):
         """Initialize LLM, embeddings, and memory components."""
