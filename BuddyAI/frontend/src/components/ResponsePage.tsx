@@ -174,7 +174,7 @@ const ResponsePage: React.FC = () => {
       // Call backend rewrite endpoint
       const response = await axios.post('/api/core/rewrite-answer/', {
         user_prompt: userMessage.content,
-        mode: explanationType,
+        mode: getLevelForBackend(explanationType),
         conversation_context: updatedHistory.slice(0, index),
         turn_index: index
       });
@@ -184,7 +184,7 @@ const ResponsePage: React.FC = () => {
         updatedHistory[index] = {
           role: 'assistant',
           content: response.data.answer,
-          mode: explanationType
+          used_mode: getLevelForBackend(explanationType)
         };
 
         setChatHistory(updatedHistory);
@@ -1826,32 +1826,27 @@ const ResponsePage: React.FC = () => {
 
       {/* Voice Session Overlay */}
       {isVoiceSession && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 flex flex-col items-center gap-6">
-            <div className="w-full flex items-center justify-between">
-              <div className="text-sm text-gray-600">{sessionStatus}</div>
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-6">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl p-8 flex flex-col items-center gap-8">
+            <div className="w-full flex items-center justify-end">
               <div className="flex items-center gap-3">
-                {/* Optional captions toggle, off by default */}
                 <label className="flex items-center gap-1 text-xs text-gray-600 select-none">
                   <input type="checkbox" checked={showCaptions} onChange={(e)=>setShowCaptions(e.target.checked)} />
                   Show captions
                 </label>
                 <button aria-label="End session" onClick={closeVoiceSession} className="p-2 rounded-full hover:bg-gray-100" title="End">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"/></svg>
                 </button>
               </div>
             </div>
-            {/* Animated orb/avatar */}
-            <div className={`w-32 h-32 rounded-full ${micState==='listening' ? 'bg-blue-100 animate-pulse' : micState==='speaking' ? 'bg-green-100 animate-pulse' : 'bg-gray-100'} flex items-center justify-center`}> 
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-10 h-10 text-gray-600"><path d="M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3Z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1a1 1 0 0 1 2 0v1a5 5 0 0 0 10 0v-1a1 1 0 0 1 2 0Z"/><path d="M12 18a1 1 0 0 1 1 1v2a1 1 0 1 1-2 0v-2a1 1 0 0 1 1-1Z"/></svg>
+            <div className={`w-48 h-48 rounded-full ${micState==='listening' ? 'bg-blue-100 animate-pulse' : micState==='speaking' ? 'bg-green-100 animate-pulse' : 'bg-gray-100'} flex items-center justify-center`}> 
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-16 h-16 text-gray-600"><path d="M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3Z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1a1 1 0 0 1 2 0v1a5 5 0 0 0 10 0v-1a1 1 0 0 1 2 0Z"/><path d="M12 18a1 1 0 0 1 1 1v2a1 1 0 1 1-2 0v-2a1 1 0 0 1 1-1Z"/></svg>
             </div>
-            {/* Big Mic Button */}
             <button
               aria-label={micState==='listening' ? 'Stop listening' : 'Start listening'}
               onClick={() => {
                 if (micState==='speaking' && 'speechSynthesis' in window) {
                   window.speechSynthesis.cancel();
-                  setMicState('idle');
                 }
                 if (micState==='listening') {
                   try { if (recognitionRef.current) recognitionRef.current.stop(); } catch {}
@@ -1860,14 +1855,12 @@ const ResponsePage: React.FC = () => {
                   startListeningInSession();
                 }
               }}
-              className={`w-20 h-20 rounded-full text-white text-sm font-medium ${micState==='listening' ? 'bg-red-600 animate-pulse' : 'bg-black hover:bg-gray-800'}`}
+              className={`w-24 h-24 rounded-full text-white text-sm font-medium ${micState==='listening' ? 'bg-red-600 animate-pulse' : 'bg-black hover:bg-gray-800'}`}
             >
               {micState==='listening' ? 'Stop' : 'Mic'}
             </button>
-            {/* Captions area only when enabled */}
             {showCaptions && (
               <div className="w-full text-center text-gray-600 text-sm">
-                {sessionTurns.length>0 && <div className="mb-1">(Captions hidden in history; visible here only)</div>}
                 {!!sessionPartial && <em>{sessionPartial}</em>}
               </div>
             )}
