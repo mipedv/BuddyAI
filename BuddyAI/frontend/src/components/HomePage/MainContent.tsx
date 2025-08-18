@@ -9,10 +9,10 @@ import axios from 'axios';
 import PDFTextbook from '../PDFTextbook';
 
 const INITIAL_SUGGESTED_TOPICS = [
-  { label: 'Solar System' },
-  { label: 'History' },
-  { label: 'Geography' },
-  { label: 'Science' }
+  { label: 'Solar System', originalLabel: 'Solar System' },
+  { label: 'History', originalLabel: 'History' },
+  { label: 'Geography', originalLabel: 'Geography' },
+  { label: 'Science', originalLabel: 'Science' }
 ];
 
 interface MainContentProps {
@@ -21,6 +21,9 @@ interface MainContentProps {
   selectedChapter: string;
   setSelectedChapter: React.Dispatch<React.SetStateAction<string>>;
   subjectsChapters: Record<string, string[]>;
+  // optional page language control passed from parent
+  pageLang?: 'en' | 'ar';
+  setPageLang?: React.Dispatch<React.SetStateAction<'en' | 'ar'>>;
 }
 
 const MainContent: React.FC<MainContentProps> = ({
@@ -28,12 +31,45 @@ const MainContent: React.FC<MainContentProps> = ({
   setSelectedSubject,
   selectedChapter,
   setSelectedChapter,
-  subjectsChapters
+  subjectsChapters,
+  pageLang: pageLangProp,
+  setPageLang: setPageLangProp
 }) => {
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
   const [explanationType, setExplanationType] = useState('Textbook Explanation');
   const [suggestedTopics, setSuggestedTopics] = useState(INITIAL_SUGGESTED_TOPICS);
+  const topicTranslateCacheRef = useRef<Map<string, string>>(new Map());
+  const [topicsTranslating, setTopicsTranslating] = useState(false);
+  const [topicsShowTranslation, setTopicsShowTranslation] = useState(false); // false = EN, true = AR
+  const [pageLangState, setPageLangState] = useState<'en' | 'ar'>(pageLangProp || 'en');
+  const pageLang = pageLangProp ?? pageLangState;
+  const setPageLang = setPageLangProp ?? setPageLangState;
+  const [translateOpen, setTranslateOpen] = useState(false);
+  const [currentTranslationMode, setCurrentTranslationMode] = useState<string | null>(null);
+  const [translateNotice, setTranslateNotice] = useState<string | null>(null);
+
+  // Simple i18n table for static labels used on HomePage
+  const t = (key: string) => {
+    const dict: Record<string, { en: string; ar: string }> = {
+      whatDoYouWant: { en: 'What do you want to know?', ar: 'ماذا تريد أن تعرف؟' },
+      askAnything: { en: 'Ask anything', ar: 'اسأل أي شيء' },
+      textBook: { en: 'Text Book', ar: 'الكتاب' },
+      openTextBook: { en: 'Open Text Book', ar: 'افتح الكتاب' },
+      viewFullChapter: { en: 'View Full Chapter', ar: 'عرض الفصل الكامل' },
+      viewSummary: { en: 'View Summary', ar: 'عرض الملخص' },
+      textbookExplanation: { en: 'Textbook Explanation', ar: 'شرح من الكتاب' },
+      selectSubject: { en: 'Select Subject', ar: 'اختر المادة' },
+      selectChapter: { en: 'Select Chapter', ar: 'اختر الفصل' },
+      send: { en: 'Send', ar: 'إرسال' },
+      voiceMode: { en: 'Voice Mode', ar: 'وضع الصوت' },
+      loadingResponse: { en: 'Loading response...', ar: 'جارٍ تحميل الإجابة...' },
+      errorPrefix: { en: 'Error:', ar: 'خطأ:' },
+      translatePage: { en: 'EN→AR', ar: 'AR→EN' },
+    };
+    const entry = dict[key];
+    return entry ? (pageLang === 'ar' ? entry.ar : entry.en) : key;
+  };
   const [isSubjectDropdownOpen, setIsSubjectDropdownOpen] = useState(false);
   const [isChapterDropdownOpen, setIsChapterDropdownOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -105,12 +141,14 @@ const MainContent: React.FC<MainContentProps> = ({
     setError(null);
     try {
       // If user asked in Arabic, pre-translate to English for the backend
-      const queryForBackend = isArabic(searchQuery) ? await translateText(searchQuery, 'en', 'ar') : searchQuery;
+      const inArabic = isArabic(searchQuery);
+      const queryForBackend = inArabic ? await translateText(searchQuery, 'en', 'ar') : searchQuery;
       const response = await axios.get(`http://localhost:8000/api/core/get-answer/`, {
-        params: { query: queryForBackend, level }
+        params: { query: queryForBackend, level, preferred_lang: inArabic ? 'ar' : 'en' }
       });
       // Navigate with state, so ResponsePage gets the data directly
-      navigate(`/response?query=${encodeURIComponent(searchQuery)}&level=${level}`, { state: { response: response.data } });
+      // Preserve the original user-visible query in the response object for display
+      navigate(`/response?query=${encodeURIComponent(searchQuery)}&level=${level}`, { state: { response: { ...response.data, query: searchQuery } } });
     } catch (err: any) {
       setError(err.response?.data?.error || 'An unexpected error occurred while fetching your answer. Please try again.');
     } finally {
@@ -126,8 +164,55 @@ const MainContent: React.FC<MainContentProps> = ({
 
   const handleTopicClick = (topic: string) => {
     setQuery(topic);
-    setSuggestedTopics(TOPIC_SPECIFIC_SUGGESTED_TOPICS[topic as keyof typeof TOPIC_SPECIFIC_SUGGESTED_TOPICS] || INITIAL_SUGGESTED_TOPICS);
-    // Removed direct call to fetchDataAndNavigate here
+    // Load topic-specific suggestions and prepare originals
+    const next = (TOPIC_SPECIFIC_SUGGESTED_TOPICS[topic as keyof typeof TOPIC_SPECIFIC_SUGGESTED_TOPICS] || INITIAL_SUGGESTED_TOPICS)
+      .map(t => ({ label: t.label, originalLabel: t.label }));
+    setSuggestedTopics(next);
+    // If chip currently set to AR, translate the new list as well
+    if (topicsShowTranslation) {
+      (async () => {
+        setTopicsTranslating(true);
+        try {
+          const translated = await Promise.all(next.map(async (t) => {
+            const key = `ar:${t.label}`;
+            const cached = topicTranslateCacheRef.current.get(key);
+            if (cached) return { ...t, label: cached };
+            const out = await translateText(t.label, 'ar', 'en');
+            topicTranslateCacheRef.current.set(key, out);
+            return { ...t, label: out };
+          }));
+          setSuggestedTopics(translated);
+        } finally {
+          setTopicsTranslating(false);
+        }
+      })();
+    }
+  };
+
+  const toggleAllTopicsLanguage = async () => {
+    if (topicsTranslating) return;
+    setTopicsTranslating(true);
+    try {
+      if (!topicsShowTranslation) {
+        // EN -> AR
+        const translated = await Promise.all(suggestedTopics.map(async (t) => {
+          const key = `ar:${t.label}`;
+          const cached = topicTranslateCacheRef.current.get(key);
+          if (cached) return { ...t, label: cached };
+          const out = await translateText(t.label, 'ar', 'en');
+          topicTranslateCacheRef.current.set(key, out);
+          return { ...t, label: out };
+        }));
+        setSuggestedTopics(translated);
+        setTopicsShowTranslation(true);
+      } else {
+        // AR -> EN (restore originals)
+        setSuggestedTopics(prev => prev.map(t => ({ ...t, label: t.originalLabel || t.label })));
+        setTopicsShowTranslation(false);
+      }
+    } finally {
+      setTopicsTranslating(false);
+    }
   };
 
   const handleChapterClick = (chapter: string) => {
@@ -196,7 +281,9 @@ const MainContent: React.FC<MainContentProps> = ({
               }}
               className="flex items-center space-x-2 px-3 py-2 border rounded-lg text-gray-700 bg-white"
             >
-              <span>{selectedSubject}</span>
+              <span dir={pageLang==='ar' ? 'rtl' : 'ltr'}>
+                {selectedSubject === 'Select Subject' ? t('selectSubject') : selectedSubject}
+              </span>
             </button>
 
             {isSubjectDropdownOpen && (
@@ -231,7 +318,9 @@ const MainContent: React.FC<MainContentProps> = ({
                 ${selectedSubject === 'Select Subject' ? 'opacity-50 cursor-not-allowed' : ''}`}
               disabled={selectedSubject === 'Select Subject'}
             >
-              <span>{selectedChapter}</span>
+              <span dir={pageLang==='ar' ? 'rtl' : 'ltr'}>
+                {selectedChapter === 'Select Chapter' ? t('selectChapter') : selectedChapter}
+              </span>
             </button>
 
             {isChapterDropdownOpen && (
@@ -251,6 +340,54 @@ const MainContent: React.FC<MainContentProps> = ({
               </div>
             )}
           </div>
+
+          {/* Translate Dropdown */}
+          <div className="relative">
+            <button
+              onClick={() => setTranslateOpen(!translateOpen)}
+              className="flex items-center space-x-2 px-3 py-2 border rounded-lg text-gray-700 bg-white"
+              title="Translate"
+            >
+              <span>{pageLang==='ar' ? 'ترجمة' : 'Translate'}</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M7 10l5 5 5-5z" fill="currentColor"/>
+              </svg>
+            </button>
+            {translateOpen && (
+              <div className="absolute z-10 mt-1 w-48 bg-white border rounded-lg shadow-lg">
+                {[
+                  { key: 'en-ar', label: pageLang==='ar' ? 'EN → AR (الإنجليزية → العربية)' : 'EN → AR', active: true },
+                  { key: 'ar-en', label: pageLang==='ar' ? 'AR → EN (العربية → الإنجليزية)' : 'AR → EN', active: true },
+                  { key: 'en-hi', label: pageLang==='ar' ? 'EN → HI (الإنجليزية → الهندية)' : 'EN → HI', active: false },
+                  { key: 'en-ml', label: pageLang==='ar' ? 'EN → ML (الإنجليزية → المالايالام)' : 'EN → ML', active: false },
+                ].map(opt => (
+                  <button
+                    key={opt.key}
+                    onClick={async () => {
+                      setTranslateOpen(false);
+                      setCurrentTranslationMode(opt.key);
+                      if (!opt.active) {
+                        setTranslateNotice(pageLang==='ar' ? 'قريباً' : 'Coming soon');
+                        setTimeout(() => setTranslateNotice(null), 1500);
+                        return;
+                      }
+                      if (opt.key === 'en-ar') {
+                        setPageLang('ar');
+                        if (!topicsShowTranslation) await toggleAllTopicsLanguage();
+                      } else if (opt.key === 'ar-en') {
+                        setPageLang('en');
+                        if (topicsShowTranslation) await toggleAllTopicsLanguage();
+                      }
+                    }}
+                    className="block w-full text-left px-3 py-2 text-sm hover:bg-gray-100"
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
         </div>
 
         {/* Header Right Component */}
@@ -263,31 +400,48 @@ const MainContent: React.FC<MainContentProps> = ({
                 setShowTextBookModal(true);
               }}
               className="flex items-center space-x-2 px-4 py-2 border border-gray-200 rounded-lg transition-all duration-200 text-sm font-medium text-gray-600 hover:bg-gray-50 hover:border-gray-300"
-              title="Open Text Book"
+              title={t('openTextBook')}
             >
             <BookOpen className="w-5 h-5 text-gray-500" />
-            <span>Text Book</span>
+            <span>{t('textBook')}</span>
           </button>
           
 
           <HeaderRight />
-        </div>
+          </div>
       </div>
 
-      {/* Chapter Buttons Component */}
-      <ChapterButtons 
-        onViewFullChapter={handleViewFullChapter}
-        onViewSummary={handleViewSummary}
-      />
+      {/* Header action buttons translated */}
+      <div className="flex justify-end space-x-4 px-8 py-2">
+        <button 
+          onClick={handleViewFullChapter}
+          className="flex items-center space-x-2 px-4 py-1.5 bg-[#f6f6f1] border border-transparent rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition-all duration-200"
+        >
+          <span>👁️</span>
+          <span>{t('viewFullChapter')}</span>
+        </button>
+        <button 
+          onClick={handleViewSummary}
+          className="flex items-center space-x-2 px-4 py-1.5 bg-[#f6f6f1] border border-transparent rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition-all duration-200"
+        >
+          <span>📝</span>
+          <span>{t('viewSummary')}</span>
+        </button>
+      </div>
+      {translateNotice && (
+        <div className="px-8 text-xs text-gray-500">{translateNotice}</div>
+      )}
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col justify-center items-center p-8">
-        <h2 className="text-3xl font-bold text-gray-800 mb-6">What do you want to know?</h2>
+        <h2 className="text-3xl font-bold text-gray-800 mb-6" dir={pageLang==='ar' ? 'rtl' : 'ltr'}>{t('whatDoYouWant')}</h2>
 
         {/* Search Input with Explanation Selector */}
         <div className="w-full max-w-2xl relative">
           <div className="flex items-center space-x-2 mb-2 justify-end">
-            <ExplanationSelector onSelect={setExplanationType} />
+            <div className="bg-[#f6f6f1] px-3 py-1.5 rounded-lg border border-transparent text-sm text-gray-700">
+              {t('textbookExplanation')}
+            </div>
           </div>
 
           <div className="relative flex items-center">
@@ -299,7 +453,7 @@ const MainContent: React.FC<MainContentProps> = ({
 
               <input
                 type="text"
-                placeholder="Ask anything"
+                placeholder={t('askAnything')}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && handleSubmit()}
@@ -402,7 +556,7 @@ const MainContent: React.FC<MainContentProps> = ({
                   }}
                   className="w-8 h-8 bg-white border border-gray-200 rounded-full flex items-center justify-center
                     transition-all duration-200 hover:bg-gray-100 hover:scale-105 active:scale-95"
-                  title={query.trim() ? "Send" : "Voice Mode"}
+                  title={query.trim() ? t('send') : t('voiceMode')}
                   disabled={loading} // Disable button while loading
                 >
                   {loading ? (
@@ -432,44 +586,47 @@ const MainContent: React.FC<MainContentProps> = ({
           {/* Loading Indicator / Error Message */}
           {loading && (
             <div className="mt-4 text-center text-blue-600 font-semibold">
-              Loading response...
+              {t('loadingResponse')}
             </div>
           )}
           {error && (
             <div className="mt-4 text-center text-red-500 font-semibold">
-              Error: {error}
+              {t('errorPrefix')} {error}
             </div>
           )}
 
           {/* Suggested Topics */}
           {!loading && !error && (
-            <div className="mt-6 grid grid-cols-2 gap-4 w-full max-w-2xl mx-auto">
-              {suggestedTopics.map((topic) => (
-                <button
-                  key={topic.label}
-                  onClick={() => handleTopicClick(topic.label)}
-                  className="flex items-center space-x-2 bg-[#f5f4ef] text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors"
-                  disabled={loading} // Disable buttons while loading
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="text-gray-500 mr-2"
+            <div className="mt-6 w-full max-w-2xl mx-auto">
+              {/* Removed per-topics toggle chip as requested */}
+              <div className="grid grid-cols-2 gap-4">
+                {suggestedTopics.map((topic) => (
+                  <button
+                    key={topic.label + (topic.originalLabel || '')}
+                    onClick={() => handleTopicClick(topic.label)}
+                    className="flex items-center space-x-2 bg-[#f5f4ef] text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors"
+                    disabled={loading}
                   >
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
-                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
-                  </svg>
-                  <span>{topic.label}</span>
-                </button>
-              ))}
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="text-gray-500 mr-2"
+                    >
+                      <circle cx="12" cy="12" r="10"></circle>
+                      <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                      <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                    </svg>
+                    <span dir={isArabic(topic.label) ? 'rtl' : 'ltr'} className={isArabic(topic.label) ? 'text-right' : 'text-left'}>{topic.label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
         </div>

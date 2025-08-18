@@ -40,10 +40,11 @@ export const SUBJECTS_CHAPTERS = {
 const HomePage: React.FC = () => {
   const [selectedSubject, setSelectedSubject] = useState('Select Subject');
   const [selectedChapter, setSelectedChapter] = useState('Select Chapter');
+  const [pageLang, setPageLang] = useState<'en' | 'ar'>('en');
 
   return (
     <div className="flex h-screen bg-white overflow-hidden">
-      <Sidebar />
+      <Sidebar pageLang={pageLang} />
       <div className="flex-1 ml-64 overflow-y-auto">
         <MainContent 
           selectedSubject={selectedSubject}
@@ -51,6 +52,10 @@ const HomePage: React.FC = () => {
           selectedChapter={selectedChapter}
           setSelectedChapter={setSelectedChapter}
           subjectsChapters={SUBJECTS_CHAPTERS}
+          // propagate pageLang control down so the translate button can toggle it
+          // @ts-ignore keep props loosely typed to avoid breaking existing code
+          pageLang={pageLang}
+          setPageLang={setPageLang}
         />
       </div>
     </div>

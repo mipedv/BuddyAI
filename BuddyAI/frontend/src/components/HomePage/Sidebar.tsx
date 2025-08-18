@@ -1,14 +1,28 @@
 import React from 'react';
 
-const menuItems = [
-  { icon: '➕', label: 'New Chat', isActive: true, className: 'text-white bg-blue-500' },
-  { icon: '📝', label: 'Practice & Test', isActive: false },
-  { icon: '🎓', label: 'Classroom Recap', isActive: false },
-  { icon: '💡', label: 'Curiosity Centre', isActive: false },
-  { icon: '📚', label: 'Library', isActive: false },
-];
+interface SidebarProps {
+  pageLang?: 'en' | 'ar';
+}
 
-const Sidebar: React.FC = () => {
+const Sidebar: React.FC<SidebarProps> = ({ pageLang = 'en' }) => {
+  const dict: Record<string, { en: string; ar: string }> = {
+    newChat: { en: 'New Chat', ar: 'محادثة جديدة' },
+    practice: { en: 'Practice & Test', ar: 'تدريب واختبار' },
+    recap: { en: 'Classroom Recap', ar: 'مراجعة الصف' },
+    curiosity: { en: 'Curiosity Centre', ar: 'مركز الفضول' },
+    library: { en: 'Library', ar: 'المكتبة' },
+    community: { en: 'Community', ar: 'المجتمع' },
+  };
+  const t = (k: keyof typeof dict) => (pageLang === 'ar' ? dict[k].ar : dict[k].en);
+
+  const menuItems = [
+    { icon: '➕', label: t('newChat'), isActive: true, className: 'text-white bg-blue-500' },
+    { icon: '📝', label: t('practice'), isActive: false },
+    { icon: '🎓', label: t('recap'), isActive: false },
+    { icon: '💡', label: t('curiosity'), isActive: false },
+    { icon: '📚', label: t('library'), isActive: false },
+  ];
+
   return (
     <div className="w-64 bg-[#F8F7F0] p-4 flex flex-col h-full fixed left-0 top-0 bottom-0 overflow-y-auto">
       {/* Logo or Branding */}
@@ -32,7 +46,7 @@ const Sidebar: React.FC = () => {
             `}
           >
             <span className="mr-3">{item.icon}</span>
-            {item.label}
+            <span dir={pageLang==='ar' ? 'rtl' : 'ltr'} className={pageLang==='ar' ? 'text-right' : 'text-left'}>{item.label}</span>
           </button>
         ))}
       </nav>
@@ -43,7 +57,7 @@ const Sidebar: React.FC = () => {
           className="w-full text-left p-3 rounded-lg transition-all duration-200 flex items-center text-gray-600 hover:bg-gray-200"
         >
           <span className="mr-3">👥</span>
-          Community
+          <span dir={pageLang==='ar' ? 'rtl' : 'ltr'} className={pageLang==='ar' ? 'text-right' : 'text-left'}>{t('community')}</span>
         </button>
       </div>
     </div>
