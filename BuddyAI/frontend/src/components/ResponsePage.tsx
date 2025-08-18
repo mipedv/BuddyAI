@@ -83,6 +83,8 @@ const ResponsePage: React.FC = () => {
     mode?: 'textbook' | 'detailed' | 'advanced';
     used_mode?: 'textbook' | 'detailed' | 'advanced';
     mode_notes?: string;
+    mode_notes_translated?: string | null;
+    mode_notes_to?: 'en' | 'ar';
     // Translation state
     id?: string;
     language?: 'en' | 'ar';
@@ -94,6 +96,44 @@ const ResponsePage: React.FC = () => {
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [autoTranslateToArabic, setAutoTranslateToArabic] = useState<boolean>(false);
   const [translationAvailable, setTranslationAvailable] = useState<boolean>(false);
+  const [translateOpen, setTranslateOpen] = useState(false);
+  const [pageLang, setPageLang] = useState<'en' | 'ar'>('en');
+  const [titleTranslated, setTitleTranslated] = useState<string | null>(null);
+  const [titleShowTranslation, setTitleShowTranslation] = useState<boolean>(false);
+
+  // simple i18n helper for static UI strings (ResponsePage only)
+  const t = (key: string) => {
+    const dict: Record<string, { en: string; ar: string }> = {
+      newChat: { en: 'New Chat', ar: 'محادثة جديدة' },
+      practice: { en: 'Practice & Test', ar: 'تدريب واختبار' },
+      recap: { en: 'Classroom Recap', ar: 'مراجعة الصف' },
+      curiosity: { en: 'Curiosity Centre', ar: 'مركز الفضول' },
+      library: { en: 'Library', ar: 'المكتبة' },
+      community: { en: 'Community', ar: 'المجتمع' },
+      translate: { en: 'TRANSLATE', ar: 'ترجمة' },
+      textbookExplanation: { en: 'Textbook Explanation', ar: 'شرح من الكتاب' },
+      detailedExplanation: { en: 'Detailed Explanation', ar: 'شرح مفصل' },
+      advancedExplanation: { en: 'Advanced Explanation', ar: 'شرح متقدم' },
+      viewFullChapter: { en: 'View Full Chapter', ar: 'عرض الفصل الكامل' },
+      viewSummary: { en: 'View Summary', ar: 'عرض الملخص' },
+      answer: { en: 'Answer', ar: 'الإجابة' },
+      suggestedQuestions: { en: 'Suggested Questions', ar: 'أسئلة مقترحة' },
+      share: { en: 'Share', ar: 'مشاركة' },
+      rewrite: { en: 'Rewrite', ar: 'إعادة صياغة' },
+      copy: { en: 'Copy', ar: 'نسخ' },
+      rateThisAnswer: { en: 'Rate this answer:', ar: 'قيّم هذه الإجابة:' },
+      viewMore: { en: 'View more', ar: 'عرض المزيد' },
+      searchImages: { en: 'Search Images', ar: 'ابحث عن الصور' },
+      searchVideos: { en: 'Search Videos', ar: 'ابحث عن الفيديوهات' },
+      listening: { en: 'Listening... Speak now', ar: 'يستمع... تكلّم الآن' },
+      askFollowUp: { en: 'Ask follow-up', ar: 'اكتب سؤال متابعة' },
+      dismiss: { en: 'Dismiss', ar: 'إغلاق' },
+      physics: { en: 'Physics', ar: 'الفيزياء' },
+      solarSystem: { en: 'Solar System', ar: 'النظام الشمسي' },
+    };
+    const entry = dict[key];
+    return entry ? (pageLang === 'ar' ? entry.ar : entry.en) : key;
+  };
   const leftPaneRef = useRef<HTMLDivElement | null>(null);
   const [isAutoScroll, setIsAutoScroll] = useState(true);
 
@@ -283,6 +323,72 @@ const ResponsePage: React.FC = () => {
     }
   }, [chatHistory, isAutoScroll]);
 
+  // Centralized translation toggle (matches HomePage behavior)
+  useEffect(() => {
+    if (!translationAvailable) return;
+    if (!autoTranslateToArabic) {
+      setChatHistory(prev => prev.map(m => ({
+        ...m,
+        showTranslation: false,
+        translatedText: undefined,
+        translatedTo: undefined,
+      })));
+      setSqShowTranslation(false);
+      setTitleShowTranslation(false);
+      setTitleTranslated(null);
+      return;
+    }
+
+    (async () => {
+      // Translate existing chat messages to Arabic (skip already-AR)
+      for (let i = 0; i < chatHistory.length; i++) {
+        const m = chatHistory[i];
+        const baseText = m.originalText || m.content;
+        const currentLang = m.language || detectLang(baseText);
+        if (currentLang === 'ar') continue;
+        // show placeholder
+        setChatHistory(prev => prev.map((mm, idx) => idx === i ? { ...mm, translatedText: '...', translatedTo: 'ar', showTranslation: true } : mm));
+        try {
+          const { text } = await translateText(baseText, 'ar', 'en');
+          setChatHistory(prev => prev.map((mm, idx) => idx === i ? { ...mm, language: 'en', originalText: baseText, translatedText: text, translatedTo: 'ar', showTranslation: true } : mm));
+        } catch {
+          setChatHistory(prev => prev.map((mm, idx) => idx === i ? { ...mm, showTranslation: false } : mm));
+        }
+      }
+
+      // Translate Suggested Questions once
+      if (response?.suggested_questions && response.suggested_questions.length > 0) {
+        try {
+          setSqTranslating(true);
+          const translated = await translateArray(response.suggested_questions, 'ar', 'en');
+          setSqTranslated(translated);
+          setSqShowTranslation(true);
+        } finally {
+          setSqTranslating(false);
+        }
+      }
+
+      // Translate title/query
+      if (response?.query) {
+        const q = response.query;
+        const lang = isArabic(q) ? 'ar' : 'en';
+        if (lang === 'en') {
+          try {
+            const { text } = await translateText(q, 'ar', 'en');
+            setTitleTranslated(text);
+            setTitleShowTranslation(true);
+          } catch {
+            setTitleTranslated(null);
+            setTitleShowTranslation(false);
+          }
+        } else {
+          setTitleTranslated(q);
+          setTitleShowTranslation(true);
+        }
+      }
+    })();
+  }, [autoTranslateToArabic, translationAvailable]);
+
   if (!response) {
     return (
       <div className="flex justify-center items-center h-screen bg-white">
@@ -291,33 +397,33 @@ const ResponsePage: React.FC = () => {
     );
   }
 
-  const displayQuery = response.query ? response.query.charAt(0).toUpperCase() + response.query.slice(1) : 'Unknown Topic';
+  // Title/query: centralized translation display
+  const displayQuery = (() => {
+    const base = response.query ? response.query.charAt(0).toUpperCase() + response.query.slice(1) : 'Unknown Topic';
+    if (autoTranslateToArabic && titleShowTranslation && titleTranslated) return titleTranslated;
+    return base;
+  })();
 
   // Function to handle new query submission from highlight-to-ask
   const handleNewQuery = async (query: string) => {
     try {
       setIsLoading(true);
-      const apiResponse = await axios.get(`http://localhost:8000/api/core/get-answer/`, {
-        params: {
-          query,
-          level: getLevelForBackend(explanationType)
+
+      const { data } = await axios.get(
+        "http://localhost:8000/api/core/get-answer/",
+        {
+          params: {
+            query,
+            level: getLevelForBackend(explanationType),
+          },
         }
-      });
+      );
 
       // Navigate to new response page
-      navigate('/response', {
-        state: { response: apiResponse.data }
-      });
-
-      // Update URL with query parameters
-      window.history.pushState(
-        null, 
-        '', 
-        `/response?query=${encodeURIComponent(query)}&level=${getLevelForBackend(explanationType)}`
-      );
-    } catch (err: any) {
-      console.error('Error submitting new query:', err);
-      setError(err.response?.data?.error || 'Failed to submit query. Please try again.');
+      navigate("/response", { state: { response: data } });
+    } catch (err) {
+      console.error("handleNewQuery failed:", err);
+      setError?.("Failed to fetch answer. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -913,29 +1019,29 @@ const ResponsePage: React.FC = () => {
       <div className="w-64 bg-[#F8F7F0] p-4 flex flex-col h-full fixed left-0 top-0 bottom-0 overflow-y-auto">
         <button className="bg-blue-500 text-white px-4 py-2 rounded-lg mb-4 flex items-center justify-center space-x-2">
           <span className="text-lg">➕</span>
-          <span>New Chat</span>
+          <span>{t('newChat')}</span>
         </button>
         <div className="space-y-2 text-gray-600">
           <div className="px-4 py-2 hover:bg-gray-100 rounded-lg cursor-pointer flex items-center space-x-3">
             <span className="text-lg">📝</span>
-            <span>Practice & Test</span>
+            <span>{t('practice')}</span>
           </div>
           <div className="px-4 py-2 hover:bg-gray-100 rounded-lg cursor-pointer flex items-center space-x-3">
             <span className="text-lg">🎓</span>
-            <span>Classroom Recap</span>
+            <span>{t('recap')}</span>
           </div>
           <div className="px-4 py-2 hover:bg-gray-100 rounded-lg cursor-pointer flex items-center space-x-3">
             <span className="text-lg">💡</span>
-            <span>Curiosity Centre</span>
+            <span>{t('curiosity')}</span>
           </div>
           <div className="px-4 py-2 hover:bg-gray-100 rounded-lg cursor-pointer flex items-center space-x-3">
             <span className="text-lg">📚</span>
-            <span>Library</span>
+            <span>{t('library')}</span>
           </div>
         </div>
         <div className="mt-auto px-4 py-2 text-gray-600 cursor-pointer flex items-center space-x-3">
           <span className="text-lg">👥</span>
-          <span>Community</span>
+          <span>{t('community')}</span>
         </div>
       </div>
 
@@ -949,15 +1055,57 @@ const ResponsePage: React.FC = () => {
               className="px-3 py-2 border rounded-lg text-gray-700 bg-white"
               disabled
             >
-              <option>Physics</option>
+              <option>{t('physics')}</option>
             </select>
             <select
               value="Solar System"
               className="px-3 py-2 border rounded-lg text-gray-700 bg-white"
               disabled
             >
-              <option>Solar System</option>
+              <option>{t('solarSystem')}</option>
             </select>
+            {/* TRANSLATE dropdown moved next to selectors */}
+            {translationAvailable && (
+              <div className="relative">
+                <button
+                  onClick={() => setTranslateOpen(!translateOpen)}
+                  className="px-3 py-2 border rounded-lg text-gray-700 bg-white flex items-center gap-2"
+                  title={t('translate')}
+                >
+                  <span className="text-sm text-gray-700">{t('translate')}</span>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M7 10l5 5 5-5z" fill="currentColor"/>
+                  </svg>
+                </button>
+                {translateOpen && (
+                  <div className="absolute right-0 z-10 mt-1 w-48 bg-white border rounded-lg shadow-lg">
+                    {[
+                      { key:'en-ar', label:'EN → AR', active:true },
+                      { key:'ar-en', label:'AR → EN', active:true },
+                      { key:'en-hi', label:'EN → HI', active:false },
+                      { key:'en-ml', label:'EN → ML', active:false },
+                    ].map(opt => {
+                      const isActive = (opt.key==='en-ar' && autoTranslateToArabic) || (opt.key==='ar-en' && !autoTranslateToArabic);
+                      return (
+                        <button
+                          key={opt.key}
+                          aria-selected={isActive ? 'true' : 'false'}
+                          onClick={() => {
+                            setTranslateOpen(false);
+                            if (!opt.active) return;
+                            if (opt.key==='en-ar') { if (!autoTranslateToArabic) setAutoTranslateToArabic(true); setPageLang('ar'); }
+                            if (opt.key==='ar-en') { if (autoTranslateToArabic) setAutoTranslateToArabic(false); setPageLang('en'); }
+                          }}
+                          className={`block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 ${isActive ? 'font-bold' : ''}`}
+                        >
+                          {isActive ? '✓ ' : ''}{opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           
           {/* Header Right */}
@@ -969,31 +1117,6 @@ const ResponsePage: React.FC = () => {
               </svg>
               <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">6</span>
             </div>
-
-            {/* Language Selector */}
-            <div className="flex items-center gap-x-2 bg-white rounded-full px-3 py-1">
-              <img
-                src="https://flagcdn.com/w40/in.png"
-                alt="Indian Flag"
-                className="w-6 h-4 rounded"
-              />
-              <span className="text-sm">English</span>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M7 10l5 5 5-5z" fill="currentColor"/>
-              </svg>
-            </div>
-
-            {/* Auto-translate to Arabic toggle */}
-            {translationAvailable && (
-              <label className="flex items-center gap-2 bg-white rounded-full px-3 py-1 border border-gray-200 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={autoTranslateToArabic}
-                  onChange={(e) => setAutoTranslateToArabic(e.target.checked)}
-                />
-                <span className="text-sm text-gray-700">Auto-translate to Arabic</span>
-              </label>
-            )}
 
             {/* User Profile */}
             <div className="flex items-center gap-x-2">
@@ -1030,7 +1153,7 @@ const ResponsePage: React.FC = () => {
                 ? 'text-gray-400' 
                 : 'text-gray-500 group-hover:text-gray-700'
             }`} />
-            <span>View Full Chapter</span>
+            <span>{t('viewFullChapter')}</span>
           </button>
           <button 
             onClick={handleViewSummary}
@@ -1047,7 +1170,7 @@ const ResponsePage: React.FC = () => {
                 ? 'text-gray-400' 
                 : 'text-gray-500 group-hover:text-gray-700'
             }`} />
-            <span>View Summary</span>
+            <span>{t('viewSummary')}</span>
           </button>
         </div>
 
@@ -1087,7 +1210,7 @@ const ResponsePage: React.FC = () => {
                   </div>
                 ) : (
                   <>
-                  <h1 className="text-2xl font-bold">{displayQuery}</h1>
+                  <h1 dir={autoTranslateToArabic ? 'rtl' : 'ltr'} className={autoTranslateToArabic ? 'text-right text-2xl font-bold' : 'text-2xl font-bold'}>{displayQuery}</h1>
                     <button 
                       onClick={handleEditQuery}
                       className="p-2 -mr-2 rounded-full hover:bg-gray-100" 
@@ -1105,7 +1228,7 @@ const ResponsePage: React.FC = () => {
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-gray-700">
                     <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.477 2 12C2 17.523 6.477 22 12 22C17.523 22 22 17.523 22 12C22 6.477 17.523 2 12 2ZM8 7.5V16.5L16 12L8 7.5Z" fill="currentColor"/>
                   </svg>
-                  <span className="text-sm text-gray-700 font-medium">Answer</span>
+                  <span className="text-sm text-gray-700 font-medium">{t('answer')}</span>
                 </div>
 
                 <div className="flex items-center gap-4">
@@ -1164,9 +1287,9 @@ const ResponsePage: React.FC = () => {
                     disabled={isLoading || isEditing}
                     className={`px-4 py-2.5 rounded-lg border border-gray-300 text-base bg-white min-w-[200px] font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${isLoading || isEditing ? 'opacity-50 cursor-not-allowed' : 'hover:border-gray-400'}`}
                   >
-                    <option>Textbook Explanation</option>
-                    <option>Detailed Explanation</option>
-                    <option>Advanced Explanation</option>
+                    <option>{t('textbookExplanation')}</option>
+                    <option>{t('detailedExplanation')}</option>
+                    <option>{t('advancedExplanation')}</option>
                   </select>
                     </div>
                 </div>
@@ -1199,10 +1322,17 @@ const ResponsePage: React.FC = () => {
                           <div className="max-w-[80%] bg-blue-50 text-gray-800 px-4 py-2 rounded-2xl rounded-tr-sm whitespace-pre-wrap">
                             <div className="flex items-center justify-end gap-2 mb-1">
                               {msg.mode && (
-                                <span className="text-[10px] uppercase tracking-wide text-blue-700 bg-blue-100 rounded px-2 py-0.5">{msg.mode}</span>
+                                <span className="text-[10px] uppercase tracking-wide text-blue-700 bg-blue-100 rounded px-2 py-0.5" dir={autoTranslateToArabic ? 'rtl' : 'ltr'}>
+                                  {msg.mode === 'textbook' ? t('textbookExplanation') : msg.mode === 'detailed' ? t('detailedExplanation') : t('advancedExplanation')}
+                                </span>
                               )}
                             </div>
-                            {msg.content}
+                            <div
+                              dir={(msg.showTranslation && msg.translatedTo === 'ar') ? 'rtl' : 'ltr'}
+                              className={(msg.showTranslation && msg.translatedTo === 'ar') ? 'text-right' : 'text-left'}
+                            >
+                              {msg.showTranslation ? (msg.translatedText || msg.content) : msg.content}
+                            </div>
                           </div>
                         </div>
                       ) : (
@@ -1221,31 +1351,14 @@ const ResponsePage: React.FC = () => {
                             <>
                               <div className="flex items-center gap-2 mb-2">
                                 {msg.used_mode && (
-                                  <span className="text-[10px] uppercase tracking-wide text-gray-700 bg-gray-100 rounded px-2 py-0.5">{msg.used_mode}</span>
+                                  <span className="text-[10px] uppercase tracking-wide text-gray-700 bg-gray-100 rounded px-2 py-0.5" dir={autoTranslateToArabic ? 'rtl' : 'ltr'}>
+                                    {msg.used_mode === 'textbook' ? t('textbookExplanation') : msg.used_mode === 'detailed' ? t('detailedExplanation') : t('advancedExplanation')}
+                                  </span>
                                 )}
                                 {msg.mode_notes && (
                                   <span className="text-[10px] text-amber-700 bg-amber-100 rounded px-2 py-0.5">{msg.mode_notes}</span>
                 )}
-                                {/* Translation badge and toggle */}
-                                {(() => {
-                                  const currentLang = msg.language || detectLang(msg.content);
-                                  const isAR = msg.showTranslation ? (msg.translatedTo === 'ar') : (currentLang === 'ar');
-                                  const pill = msg.showTranslation ? (msg.translatedTo === 'ar' ? 'Translated from EN' : 'Translated from AR') : undefined;
-                                  return (
-                                    <div className="ml-auto flex items-center gap-2">
-                                      {pill && (
-                                        <span className="text-[10px] uppercase tracking-wide text-purple-700 bg-purple-100 rounded px-2 py-0.5">{pill}</span>
-                                      )}
-                                      <button
-                                        onClick={() => handleToggleTranslation(idx)}
-                                        className="text-xs px-2 py-0.5 border rounded hover:bg-gray-50"
-                                        title={isAR ? 'Translate to English' : 'Translate to Arabic'}
-                                      >
-                                        {isAR ? 'Translate to English' : 'Translate to Arabic'}
-                                      </button>
-                                    </div>
-                                  );
-                                })()}
+                                {/* No per-message translation badges when centralized */}
               </div>
                               <div dir={(msg.showTranslation && msg.translatedTo === 'ar') ? 'rtl' : 'ltr'} className={(msg.showTranslation && msg.translatedTo === 'ar') ? 'text-right' : 'text-left'}>
                                 {msg.showTranslation ? (msg.translatedText || '') : msg.content}
@@ -1266,7 +1379,7 @@ const ResponsePage: React.FC = () => {
                   disabled={isLoading}
                 >
                   <Share2 className="w-4 h-4" />
-                  Share
+                  {t('share')}
                 </button>
                 <button 
                     onClick={() => handleRewrite(chatHistory.length - 1)}
@@ -1274,7 +1387,7 @@ const ResponsePage: React.FC = () => {
                   disabled={isLoading}
                 >
                   <RefreshCw className="w-4 h-4" />
-                  Rewrite
+                  {t('rewrite')}
                   </button>
                   <button 
                     onClick={handleCopyToClipboard}
@@ -1282,7 +1395,7 @@ const ResponsePage: React.FC = () => {
                     disabled={isLoading}
                   >
                     <Copy className="w-4 h-4" />
-                    {copied ? 'Copied!' : 'Copy'}
+                    {copied ? 'Copied!' : t('copy')}
                   </button>
                   <div className="relative">
                     <button 
@@ -1307,7 +1420,7 @@ const ResponsePage: React.FC = () => {
 
                 {/* Rating Section */}
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-500">Rate this answer:</span>
+                  <span className="text-sm text-gray-500">{t('rateThisAnswer')}</span>
                   <button 
                     onClick={() => handleRating('up')}
                     className={`p-1 rounded-full hover:bg-gray-100 ${rating === 'up' ? 'bg-green-100 text-green-600' : 'text-gray-500'}`}
@@ -1328,31 +1441,8 @@ const ResponsePage: React.FC = () => {
               {(response.suggested_questions && response.suggested_questions.length > 0) || isLoading ? (
               <div className="mb-8">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold">Suggested Questions</h3>
-                  {response.suggested_questions && response.suggested_questions.length > 0 && (
-                    <button
-                      onClick={async () => {
-                        if (sqTranslating) return;
-                        try {
-                          setSqTranslating(true);
-                          if (!sqShowTranslation) {
-                            const translated = await translateArray(response.suggested_questions, 'ar', 'en');
-                            setSqTranslated(translated);
-                            setSqShowTranslation(true);
-                          } else {
-                            setSqShowTranslation(false);
-                          }
-                        } finally {
-                          setSqTranslating(false);
-                        }
-                      }}
-                      title={sqShowTranslation ? 'View EN' : 'View AR'}
-                      className="text-xs px-2 py-1 border rounded hover:bg-gray-50 disabled:opacity-50"
-                      disabled={sqTranslating}
-                    >
-                      {sqShowTranslation ? 'AR→EN' : 'EN→AR'}
-                    </button>
-                  )}
+                  <h3 className="text-lg font-semibold" dir={pageLang==='ar' ? 'rtl' : 'ltr'}>{t('suggestedQuestions')}</h3>
+                  {/* Centralized control: remove per-section toggle */}
                 </div>
                 <div className={`border-t border-gray-200 divide-y divide-gray-200 ${isLoading ? 'opacity-50' : ''}`}>
                   {isLoading ? (
@@ -1389,7 +1479,7 @@ const ResponsePage: React.FC = () => {
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
                     </svg>
-                    <span>Listening... Speak now</span>
+                    <span>{t('listening')}</span>
                   </div>
                 ) : (
                   <div className="relative">
@@ -1445,7 +1535,7 @@ const ResponsePage: React.FC = () => {
                         value={followUpQuery}
                         onChange={(e) => setFollowUpQuery(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleFollowUpSubmit()}
-                  placeholder="Ask follow-up"
+                        placeholder={t('askFollowUp')}
                         className="w-full px-4 py-3 pr-12 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                       />
                     )}
@@ -1553,7 +1643,7 @@ const ResponsePage: React.FC = () => {
                 onClick={() => handleMediaNavigation('images')}
                 className="w-full text-center py-2 bg-[#F8F7F0] text-gray-700 font-medium rounded-b-lg hover:bg-gray-100 transition-colors"
               >
-                View more
+                {t('viewMore')}
               </button>
             </div>
 
@@ -1565,7 +1655,7 @@ const ResponsePage: React.FC = () => {
               >
                 <div className="flex items-center gap-3">
                   <Search className="w-5 h-5 text-gray-600" />
-                  <span>Search Images</span>
+                  <span>{t('searchImages')}</span>
                 </div>
                 <span className="text-gray-400 font-bold">+</span>
               </button>
@@ -1575,7 +1665,7 @@ const ResponsePage: React.FC = () => {
               >
                 <div className="flex items-center gap-3">
                   <Video className="w-5 h-5 text-gray-600" />
-                  <span>Search Videos</span>
+                  <span>{t('searchVideos')}</span>
                 </div>
                 <span className="text-gray-400 font-bold">+</span>
               </button>
