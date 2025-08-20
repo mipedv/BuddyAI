@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 
 interface SidebarProps {
   pageLang?: 'en' | 'ar';
@@ -15,9 +16,10 @@ const Sidebar: React.FC<SidebarProps> = ({ pageLang = 'en' }) => {
   };
   const t = (k: keyof typeof dict) => (pageLang === 'ar' ? dict[k].ar : dict[k].en);
 
+  const navigate = useNavigate();
   const menuItems = [
-    { icon: '➕', label: t('newChat'), isActive: true, className: 'text-white bg-blue-500' },
-    { icon: '📝', label: t('practice'), isActive: false },
+    { icon: '➕', label: t('newChat'), isActive: true, onClick: () => navigate('/home'), className: 'text-white bg-blue-500' },
+    { icon: '📝', label: t('practice'), isActive: false, onClick: () => navigate('/practice-test') },
     { icon: '🎓', label: t('recap'), isActive: false },
     { icon: '💡', label: t('curiosity'), isActive: false },
     { icon: '📚', label: t('library'), isActive: false },
@@ -44,6 +46,7 @@ const Sidebar: React.FC<SidebarProps> = ({ pageLang = 'en' }) => {
                 ? 'text-white bg-blue-500 hover:bg-blue-600' 
                 : 'text-gray-600 hover:bg-gray-200'}
             `}
+            onClick={item.onClick as any}
           >
             <span className="mr-3">{item.icon}</span>
             <span dir={pageLang==='ar' ? 'rtl' : 'ltr'} className={pageLang==='ar' ? 'text-right' : 'text-left'}>{item.label}</span>
