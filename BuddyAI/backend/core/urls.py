@@ -1,5 +1,6 @@
 from django.urls import path
 from .views import llm_view, translate_view
+from .views import practice_view
 
 urlpatterns = [
     path('get-answer/', llm_view.get_answer, name='get_answer'),
@@ -7,4 +8,6 @@ urlpatterns = [
     path('translate/status/', translate_view.translate_status_view, name='translate_status'),
     path('translate/', translate_view.translate_view, name='translate'),
     path('rewrite-answer/', llm_view.rewrite_answer, name='rewrite_answer'),
+    path('chapters/<str:chapter_id>/generate-questions', practice_view.generate_questions, name='generate_questions'),
+    path('questions/<str:question_id>/score', practice_view.score_question, name='score_question'),
 ]

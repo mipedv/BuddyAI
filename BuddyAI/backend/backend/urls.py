@@ -15,10 +15,15 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path, include, re_path
+from core.views.practice_api import GenerateQuestionsView, ScoreQuestionView, CorrectAnswerView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/core/', include('core.urls')),
     path('api/users/', include('users.urls')),
+    # Accept top-level API routes for Practice & Test (with or without trailing slash)
+    re_path(r'^api/chapters/(?P<chapter_slug>[-a-z0-9]+)/generate-questions/?$', GenerateQuestionsView.as_view()),
+    re_path(r'^api/questions/(?P<question_id>[-A-Za-z0-9_]+)/score/?$', ScoreQuestionView.as_view()),
+    re_path(r'^api/questions/(?P<question_id>[-A-Za-z0-9_]+)/correct/?$', CorrectAnswerView.as_view()),
 ]
