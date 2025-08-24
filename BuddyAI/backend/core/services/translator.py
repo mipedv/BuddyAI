@@ -208,6 +208,7 @@ def get_translator() -> TranslatorProviderBase:
     llm_api_key = os.getenv("LLM_TRANSLATOR_API_KEY") or os.getenv("OPENAI_API_KEY")
     llm_base_url = os.getenv("LLM_TRANSLATOR_API_BASE") or os.getenv("OPENAI_BASE_URL")
 
+    # Explicit providers first
     if provider == "google":
         return GoogleV2Translator(api_key)
     if provider == "azure":
@@ -218,6 +219,10 @@ def get_translator() -> TranslatorProviderBase:
     if provider == "libre":
         return LibreTranslator(endpoint, api_key)
     if provider in ("llm", "deepseek"):
+        return LLMTranslator(api_key=llm_api_key, base_url=llm_base_url, model=os.getenv("LLM_TRANSLATOR_MODEL"))
+
+    # Fallback: if LLM creds are present, use LLM translator even without provider set
+    if llm_api_key and (llm_base_url or True):  # base_url optional for some gateways
         return LLMTranslator(api_key=llm_api_key, base_url=llm_base_url, model=os.getenv("LLM_TRANSLATOR_MODEL"))
 
     # No provider configured

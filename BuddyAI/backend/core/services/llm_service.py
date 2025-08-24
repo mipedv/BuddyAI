@@ -261,14 +261,12 @@ ADVANCED COMPREHENSIVE EXPLANATION:"""
                 context=context,
                 question=message
             )
-            
             response = config["llm"].invoke(prompt)
             answer = response.content.strip()
-            
             # Validate answer quality
             if any(phrase in answer.lower() for phrase in [
-                "i don't have information", 
-                "not in the textbook", 
+                "i don't have information",
+                "not in the textbook",
                 "cannot be answered",
                 "insufficient information"
             ]):
@@ -280,7 +278,6 @@ ADVANCED COMPREHENSIVE EXPLANATION:"""
                     "used_mode": "textbook",
                     "mode_notes": "Insufficient textbook chunks found to confidently answer."
                 }
-
             # Successful textbook answer
             return {
                 "success": True,
@@ -291,7 +288,6 @@ ADVANCED COMPREHENSIVE EXPLANATION:"""
                 "used_mode": "textbook",
                 "mode_notes": "Answer generated strictly from retrieved textbook chunks."
             }
-
         except Exception as e:
             print(f"❌ Error generating textbook answer: {e}")
             return {
@@ -394,7 +390,7 @@ ADVANCED COMPREHENSIVE EXPLANATION:"""
                 return self.generate_advanced_answer(message)
             
             else:
-                return f"Invalid level '{level}'. Please use 'textbook', 'detailed', or 'advanced'."
+                raise ValueError(f"Invalid level '{level}'. Please use 'textbook', 'detailed', or 'advanced'.")
                 
         except Exception as e:
             print(f"❌ ERROR in {level} mode: {e}")

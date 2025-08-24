@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
+import { useNavigate } from 'react-router-dom';
 import Sidebar from './HomePage/Sidebar';
 
 type PageLang = 'en' | 'ar';
@@ -35,6 +36,7 @@ interface ScoreResponse {
 }
 
 const PracticeTestPage: React.FC = () => {
+  const navigate = useNavigate();
   const [pageLang, setPageLang] = useState<PageLang>('en');
   const [mode, setMode] = useState<'practice' | 'test'>('practice');
   const [section, setSection] = useState<string | null>(null);
@@ -52,6 +54,11 @@ const PracticeTestPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Test Mode session state
+  const [test, setTest] = useState<{ id: string; submitted: boolean; passThreshold: number } | null>(null);
+  const [savedMap, setSavedMap] = useState<Record<string, boolean>>({});
+  const [justSaved, setJustSaved] = useState<boolean>(false);
+
   const t = useMemo(() => {
     const dict: Record<string, { en: string; ar: string }> = {
       practiceTest: { en: 'Practice & Test', ar: 'تدريب واختبار' },
@@ -63,6 +70,9 @@ const PracticeTestPage: React.FC = () => {
       question: { en: 'Question', ar: 'سؤال' },
       writeAnswer: { en: 'Write answer', ar: 'اكتب الإجابة' },
       checkAnswer: { en: 'Check Answer', ar: 'تحقق من الإجابة' },
+      saveAndNext: { en: 'Save & Next', ar: 'حفظ وانتقال' },
+      submitTest: { en: 'Submit Test', ar: 'تسليم الاختبار' },
+      saved: { en: 'Saved', ar: 'تم الحفظ' },
       next: { en: 'Next', ar: 'التالي' },
       tryAgain: { en: 'Try Answering Again', ar: 'حاول الإجابة مرة أخرى' },
       viewCorrect: { en: 'View Correct Answer', ar: 'عرض الإجابة الصحيحة' },
@@ -160,6 +170,97 @@ const PracticeTestPage: React.FC = () => {
     }
   };
 
+  // Test Mode helpers
+  const startTestIfNeeded = async () => {
+    if (mode !== 'test') return;
+    if (test?.id) return;
+    if (!questions.length) return;
+    const chapterId = questions[0]?.chapterId || 'solar-system';
+    try {
+      const res = await axios.post(`/api/tests/start/`, {
+        chapterId,
+        questionIds: questions.map(q => q.id),
+        passThreshold: 60,
+      });
+      const testId = res.data?.testId as string;
+      if (testId) {
+        setTest({ id: testId, submitted: false, passThreshold: 60 });
+        window.localStorage.setItem('practiceTest.testId', testId);
+      }
+    } catch (e) {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    // Resume existing test if present
+    const existing = window.localStorage.getItem('practiceTest.testId');
+    if (existing && !test?.id) {
+      setTest({ id: existing, submitted: false, passThreshold: 60 });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    startTestIfNeeded();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, questions.length]);
+
+  const saveAndNext = async () => {
+    if (mode !== 'test' || !current || !test?.id) return;
+    const qid = current.id;
+    const answer = current.type === 'written' ? answerText : selectedOption;
+    try {
+      const res = await axios.post(`/api/tests/${test.id}/save/`, {
+        questionId: qid,
+        answer,
+      });
+      if (res.data?.saved) {
+        setSavedMap(prev => ({ ...prev, [qid]: true }));
+        setJustSaved(true);
+        setTimeout(() => setJustSaved(false), 1200);
+        setCurrentIndex(Math.min(questions.length - 1, currentIndex + 1));
+      }
+    } catch (e: any) {
+      // If backend was restarted and in-memory session lost, start a new test and retry once
+      const status = e?.response?.status;
+      if (status === 404) {
+        try {
+          const chapterId = questions[0]?.chapterId || 'solar-system';
+          const startRes = await axios.post(`/api/tests/start/`, {
+            chapterId,
+            questionIds: questions.map(q => q.id),
+            passThreshold: 60,
+          });
+          const newId: string | undefined = startRes.data?.testId;
+          if (newId) {
+            setTest({ id: newId, submitted: false, passThreshold: 60 });
+            window.localStorage.setItem('practiceTest.testId', newId);
+            const res2 = await axios.post(`/api/tests/${newId}/save/`, { questionId: qid, answer });
+            if (res2.data?.saved) {
+              setSavedMap(prev => ({ ...prev, [qid]: true }));
+              setJustSaved(true);
+              setTimeout(() => setJustSaved(false), 1200);
+              setCurrentIndex(Math.min(questions.length - 1, currentIndex + 1));
+            }
+          }
+        } catch {}
+      }
+    }
+  };
+
+  const submitTest = async () => {
+    if (!test?.id) return;
+    try {
+      await axios.post(`/api/tests/${test.id}/submit/`, {
+        passThreshold: test.passThreshold,
+      });
+      navigate(`/practice-test/summary?testId=${encodeURIComponent(test.id)}`);
+    } catch (e) {
+      // ignore
+    }
+  };
+
   // Centralized translation effect for dynamic content on this page
   useEffect(() => {
     const target: 'en' | 'ar' = pageLang;
@@ -227,6 +328,11 @@ const PracticeTestPage: React.FC = () => {
               <button className="px-3 py-1 border rounded text-sm" onClick={generate} disabled={isLoading}>
                 {t('generateMore')}
               </button>
+              {mode==='test' && Object.values(savedMap).some(Boolean) && (
+                <button className="px-3 py-1 bg-teal-700 text-white rounded text-sm" onClick={submitTest}>
+                  {t('submitTest')}
+                </button>
+              )}
             </div>
           </div>
 
@@ -238,7 +344,7 @@ const PracticeTestPage: React.FC = () => {
             <div className="bg-white rounded-xl border p-4">
               <div className="flex items-center justify-between mb-2">
                 <div className="text-gray-600 text-sm">{t('question')} {currentIndex + 1}</div>
-                {score !== null && (
+                {mode==='practice' && score !== null && (
                   <div className="flex items-center gap-2 text-sm">
                     <span className="inline-flex items-center gap-1 border rounded-full px-3 py-1">
                       <span className="w-2 h-2 rounded-full bg-red-600"></span>
@@ -269,9 +375,18 @@ const PracticeTestPage: React.FC = () => {
               )}
 
               <div className="flex items-center gap-3 mt-4">
-                <button className="px-4 py-2 bg-teal-700 text-white rounded" onClick={scoreCurrent} disabled={isLoading}>
-                  {t('checkAnswer')}
-                </button>
+                {mode==='practice' ? (
+                  <button className="px-4 py-2 bg-teal-700 text-white rounded" onClick={scoreCurrent} disabled={isLoading}>
+                    {t('checkAnswer')}
+                  </button>
+                ) : (
+                  <button className="px-4 py-2 bg-teal-700 text-white rounded" onClick={saveAndNext} disabled={isLoading}>
+                    {t('saveAndNext')}
+                  </button>
+                )}
+                {mode==='test' && justSaved && (
+                  <span className="text-xs text-teal-700">{t('saved')}</span>
+                )}
                 <div className="ml-auto flex items-center gap-2">
                   <button className="px-3 py-2 border rounded" onClick={() => setCurrentIndex(Math.max(0, currentIndex-1))}>{'⏮'}</button>
                   <button className="px-3 py-2 border rounded" onClick={() => setCurrentIndex(Math.min(questions.length-1, currentIndex+1))}>{t('next')}</button>
@@ -281,7 +396,7 @@ const PracticeTestPage: React.FC = () => {
             </div>
           )}
 
-          {feedback && (
+          {mode==='practice' && feedback && (
             <div className="mt-4 bg-white border rounded-xl p-4">
               <div className="flex gap-3 text-sm border-b pb-2 mb-3">
                 <div className="px-3 py-1 rounded-full bg-gray-200">{t('recommendation')}</div>
@@ -305,7 +420,7 @@ const PracticeTestPage: React.FC = () => {
             </div>
           )}
 
-          {showCorrect && (
+          {mode==='practice' && showCorrect && (
             <div className="mt-4 bg-white border rounded-xl p-4">
               <div className="font-medium mb-2">{t('viewCorrect')}</div>
               <div className="text-gray-800 whitespace-pre-wrap">{correctAnswer}</div>

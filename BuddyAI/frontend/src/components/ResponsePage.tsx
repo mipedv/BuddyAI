@@ -1206,8 +1206,8 @@ const ResponsePage: React.FC = () => {
                       className="px-3 py-1 bg-gray-500 text-white rounded text-sm hover:bg-gray-600"
                     >
                       Cancel
-                    </button>
-                  </div>
+                  </button>
+                </div>
                 ) : (
                   <>
                   <h1 dir={autoTranslateToArabic ? 'rtl' : 'ltr'} className={autoTranslateToArabic ? 'text-right text-2xl font-bold' : 'text-2xl font-bold'}>{displayQuery}</h1>
@@ -1438,7 +1438,7 @@ const ResponsePage: React.FC = () => {
             </div>
 
             {/* Suggested Questions (click-to-input) */}
-              {(response.suggested_questions && response.suggested_questions.length > 0) || isLoading ? (
+            {(response.suggested_questions && response.suggested_questions.length > 0) || isLoading ? (
               <div className="mb-8">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-semibold" dir={pageLang==='ar' ? 'rtl' : 'ltr'}>{t('suggestedQuestions')}</h3>
