@@ -17,6 +17,7 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include, re_path
 from core.views.practice_api import GenerateQuestionsView, ScoreQuestionView, CorrectAnswerView
+from core.views import test_api
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -26,4 +27,9 @@ urlpatterns = [
     re_path(r'^api/chapters/(?P<chapter_slug>[-a-z0-9]+)/generate-questions/?$', GenerateQuestionsView.as_view()),
     re_path(r'^api/questions/(?P<question_id>[-A-Za-z0-9_]+)/score/?$', ScoreQuestionView.as_view()),
     re_path(r'^api/questions/(?P<question_id>[-A-Za-z0-9_]+)/correct/?$', CorrectAnswerView.as_view()),
+    # Test Mode endpoints (accept with or without trailing slash)
+    re_path(r'^api/tests/start/?$', test_api.start_test),
+    re_path(r'^api/tests/(?P<test_id>[0-9a-fA-F-]+)/save/?$', test_api.save_answer),
+    re_path(r'^api/tests/(?P<test_id>[0-9a-fA-F-]+)/submit/?$', test_api.submit_test),
+    re_path(r'^api/tests/(?P<test_id>[0-9a-fA-F-]+)/summary/?$', test_api.summary),
 ]

@@ -36,7 +36,8 @@ def get_answer(request):
             'success': True,
             'answer': response['answer'],
             'suggested_questions': response.get('suggested_questions', []),
-            'level': level
+            'level': level,
+            'query': query
         })
 
     except Exception as e:

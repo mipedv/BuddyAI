@@ -8,6 +8,10 @@ import ResponsePage from './components/ResponsePage';
 import MediaGalleryPage from './components/MediaGalleryPage';
 import TestSelection from './components/TestSelection';
 import PracticeTestPage from './components/PracticeTestPage';
+import PracticeTestSummary from './components/PracticeTestSummary';
+import CommunityPage from './components/CommunityPage';
+import CuriosityCentrePage from './components/CuriosityCentrePage';
+import ProfilePage from './components/ProfilePage';
 
 const App: React.FC = () => {
   return (
@@ -19,6 +23,10 @@ const App: React.FC = () => {
         <Route path="/chapter" element={<ChapterDetailPage />} />
         <Route path="/response" element={<ResponsePage />} />
         <Route path="/practice-test" element={<PracticeTestPage />} />
+        <Route path="/practice-test/summary" element={<PracticeTestSummary />} />
+        <Route path="/community" element={<CommunityPage />} />
+        <Route path="/curiosity-centre" element={<CuriosityCentrePage />} />
+        <Route path="/profile" element={<ProfilePage />} />
         <Route path="/media-gallery" element={<MediaGalleryPage />} />
         <Route path="/test-selection" element={<TestSelection />} />
         <Route path="/" element={<Navigate to="/login" replace />} />

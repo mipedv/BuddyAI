@@ -21,7 +21,7 @@ const Sidebar: React.FC<SidebarProps> = ({ pageLang = 'en' }) => {
     { icon: '➕', label: t('newChat'), isActive: true, onClick: () => navigate('/home'), className: 'text-white bg-blue-500' },
     { icon: '📝', label: t('practice'), isActive: false, onClick: () => navigate('/practice-test') },
     { icon: '🎓', label: t('recap'), isActive: false },
-    { icon: '💡', label: t('curiosity'), isActive: false },
+    { icon: '💡', label: t('curiosity'), isActive: false, onClick: () => navigate('/curiosity-centre') },
     { icon: '📚', label: t('library'), isActive: false },
   ];
 
@@ -58,6 +58,7 @@ const Sidebar: React.FC<SidebarProps> = ({ pageLang = 'en' }) => {
       <div className="mt-auto">
         <button
           className="w-full text-left p-3 rounded-lg transition-all duration-200 flex items-center text-gray-600 hover:bg-gray-200"
+          onClick={() => navigate('/community')}
         >
           <span className="mr-3">👥</span>
           <span dir={pageLang==='ar' ? 'rtl' : 'ltr'} className={pageLang==='ar' ? 'text-right' : 'text-left'}>{t('community')}</span>
