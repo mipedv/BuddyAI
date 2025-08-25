@@ -74,7 +74,7 @@ const LoginPage: React.FC = () => {
                     {/* Brand Logo - No Icon */}
                     <div className="flex items-center mb-4">
                         <h1 className="text-4xl font-bold">
-                            <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">Buddy</span>{' '}
+                            <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">Homie</span>{' '}
                             <span className="text-gray-800">AI</span>
                         </h1>
                     </div>

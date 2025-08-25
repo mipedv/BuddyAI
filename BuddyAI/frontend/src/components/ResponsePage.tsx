@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Share2, Search, Video, RefreshCw, FileText, BookOpen, Edit3, ThumbsUp, ThumbsDown, Copy, MoreHorizontal, X } from 'lucide-react';
+import { Share2, Search, Video, RefreshCw, FileText, BookOpen, Edit3, ThumbsUp, ThumbsDown, Copy, MoreHorizontal, X, ArrowLeft } from 'lucide-react';
 import AskBuddyAIButton from './AskBuddyAIButton';
 import axios from 'axios';
 import PDFTextbook from './PDFTextbook';
@@ -1017,6 +1017,21 @@ const ResponsePage: React.FC = () => {
     <div className="flex h-screen bg-white font-sans overflow-hidden">
       {/* Sidebar */}
       <div className="w-64 bg-[#F8F7F0] p-4 flex flex-col h-full fixed left-0 top-0 bottom-0 overflow-y-auto">
+        {/* Brand + Back */}
+        <div className="mb-4 flex items-center justify-between">
+          <h1 className="text-2xl font-bold text-gray-800 select-none">
+            <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">Homie</span>{' '}
+            <span>AI</span>
+          </h1>
+          <button
+            onClick={() => { if (window.history.length > 1) window.history.back(); else navigate('/home'); }}
+            title="Back"
+            aria-label="Back"
+            className="p-2 rounded hover:bg-gray-200 text-gray-600"
+          >
+            <ArrowLeft size={20} />
+          </button>
+        </div>
         <button className="bg-blue-500 text-white px-4 py-2 rounded-lg mb-4 flex items-center justify-center space-x-2">
           <span className="text-lg">➕</span>
           <span>{t('newChat')}</span>
@@ -1030,7 +1045,10 @@ const ResponsePage: React.FC = () => {
             <span className="text-lg">🎓</span>
             <span>{t('recap')}</span>
           </div>
-          <div className="px-4 py-2 hover:bg-gray-100 rounded-lg cursor-pointer flex items-center space-x-3">
+          <div
+            className="px-4 py-2 hover:bg-gray-100 rounded-lg cursor-pointer flex items-center space-x-3"
+            onClick={() => navigate('/curiosity/my-chapter')}
+          >
             <span className="text-lg">💡</span>
             <span>{t('curiosity')}</span>
           </div>
