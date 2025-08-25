@@ -76,7 +76,7 @@ const HeaderRight: React.FC = () => {
                         <ul className="py-1">
                             <li 
                                 className="px-4 py-2 hover:bg-gray-100 cursor-pointer"
-                                onClick={() => { setIsDropdownOpen(false); navigate('/profile'); }}
+                                onClick={() => navigate('/profile')}
                             >
                                 My Profile
                             </li>

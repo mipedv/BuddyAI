@@ -1,6 +1,7 @@
 from django.urls import path
 from .views import llm_view, translate_view
 from .views import practice_view
+from .views import curiosity_view
 from .views import test_api
 
 urlpatterns = [
@@ -11,6 +12,8 @@ urlpatterns = [
     path('rewrite-answer/', llm_view.rewrite_answer, name='rewrite_answer'),
     path('chapters/<str:chapter_id>/generate-questions', practice_view.generate_questions, name='generate_questions'),
     path('questions/<str:question_id>/score', practice_view.score_question, name='score_question'),
+    # Curiosity
+    path('curiosity/discover', curiosity_view.discover, name='curiosity_discover'),
     # Test Mode endpoints under /api/core/ for proxy compatibility
     path('tests/start/', test_api.start_test, name='tests_start'),
     path('tests/<uuid:test_id>/save/', test_api.save_answer, name='tests_save'),
