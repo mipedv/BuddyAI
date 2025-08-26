@@ -1,5 +1,0 @@
-[33me9dbe50[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m Merge feature: Community/Curiosity/Profile updates
-[33m6bd8437[m feat: Community events/cards, translator on Community; My Profile static page (dynamic user + header bands + badges); Curiosity layout fixes; Sidebar active highlight; routes wiring. Remove temporary static images/pages.
-[33mf5646c2[m Merge pull request #1 from mipedv/feature/test-mode-static-pages
-[33m725ddab[m feat: Test Mode APIs/UI, static Community/Curiosity/Profile pages, responsive static image layout, fix llm_service indentation
-[33me681d19[m Implement centralized translation, voice mode, and i18n across HomePage and ResponsePage
