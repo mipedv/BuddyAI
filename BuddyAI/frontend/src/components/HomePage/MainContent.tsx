@@ -76,6 +76,7 @@ const MainContent: React.FC<MainContentProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isVoiceMode, setIsVoiceMode] = useState(false);
   const [micState, setMicState] = useState<'idle' | 'listening' | 'processing' | 'speaking'>('idle');
+  const [isVoiceActive, setIsVoiceActive] = useState(false); // Track if voice should be actively listening
   const recognitionRef = useRef<any>(null);
   const [showCaptions, setShowCaptions] = useState<boolean>(false);
   const [sessionPartial, setSessionPartial] = useState<string>('');
@@ -541,6 +542,7 @@ const MainContent: React.FC<MainContentProps> = ({
                 <button
                   onClick={query.trim() ? handleSubmit : () => {
                     setIsVoiceMode(true);
+                    setIsVoiceActive(true); // Start voice mode as active
                     setSessionPartial('');
                     setSessionTurns([]);
                     try {
@@ -554,7 +556,13 @@ const MainContent: React.FC<MainContentProps> = ({
                       rec.interimResults = true;
                       rec.continuous = false;
                       rec.onstart = () => setMicState('listening');
-                      rec.onend = () => { if (isVoiceMode && micState!== 'speaking') { try { rec.start(); } catch {} } else { setMicState('idle'); } };
+                      rec.onend = () => { 
+                        if (isVoiceActive && micState !== 'speaking') { 
+                          try { rec.start(); } catch {} 
+                        } else { 
+                          setMicState('idle'); 
+                        } 
+                      };
                       rec.onerror = () => setMicState('idle');
                       rec.onresult = async (e: any) => {
                         let interim = '';
@@ -581,7 +589,7 @@ const MainContent: React.FC<MainContentProps> = ({
                               window.speechSynthesis.cancel();
                               const u = new SpeechSynthesisUtterance(answer);
                               u.onstart = () => setMicState('speaking');
-                              u.onend = () => { setMicState('idle'); if (isVoiceMode) { try { rec.start(); } catch {} } };
+                              u.onend = () => { setMicState('idle'); if (isVoiceActive) { try { rec.start(); } catch {} } };
                               window.speechSynthesis.speak(u);
                             }
                           } catch { setMicState('idle'); }
@@ -690,6 +698,7 @@ const MainContent: React.FC<MainContentProps> = ({
                 </label>
                 <button aria-label="End session" onClick={()=>{
                   setIsVoiceMode(false);
+                  setIsVoiceActive(false); // Stop voice mode completely
                   try { if (recognitionRef.current) recognitionRef.current.stop(); } catch {}
                   recognitionRef.current = null;
                   if ('speechSynthesis' in window) window.speechSynthesis.cancel();
@@ -703,11 +712,18 @@ const MainContent: React.FC<MainContentProps> = ({
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-16 h-16 text-gray-600"><path d="M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3Z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1a1 1 0 0 1 2 0v1a5 5 0 0 0 10 0v-1a1 1 0 0 1 2 0Z"/><path d="M12 18a1 1 0 0 1 1 1v2a1 1 0 1 1-2 0v-2a1 1 0 0 1 1-1Z"/></svg>
             </div>
             <button
-              aria-label={micState==='listening' ? 'Stop listening' : 'Start listening'}
+              aria-label={isVoiceActive ? 'Stop Voice Mode' : 'Start Voice Mode'}
               onClick={()=>{
                 if (micState==='speaking' && 'speechSynthesis' in window) { window.speechSynthesis.cancel(); }
-                if (micState==='listening') { try { if (recognitionRef.current) recognitionRef.current.stop(); } catch {}; setMicState('idle'); }
+                if (isVoiceActive) { 
+                  // Stop voice mode
+                  setIsVoiceActive(false);
+                  try { if (recognitionRef.current) recognitionRef.current.stop(); } catch {}; 
+                  setMicState('idle'); 
+                }
                 else {
+                  // Start voice mode
+                  setIsVoiceActive(true);
                   try {
                     const SpeechRecognition: any = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
                     if (!SpeechRecognition) return;
@@ -718,7 +734,7 @@ const MainContent: React.FC<MainContentProps> = ({
                     rec.interimResults = true;
                     rec.continuous = false;
                     rec.onstart = () => setMicState('listening');
-                    rec.onend = () => { if (isVoiceMode && micState!== 'speaking') { try { rec.start(); } catch {} } else { setMicState('idle'); } };
+                    rec.onend = () => { if (isVoiceActive && micState !== 'speaking') { try { rec.start(); } catch {} } else { setMicState('idle'); } };
                     rec.onerror = () => setMicState('idle');
                     rec.onresult = (e:any)=>{
                       let interim = '', finalText = '';
@@ -736,7 +752,7 @@ const MainContent: React.FC<MainContentProps> = ({
                               window.speechSynthesis.cancel();
                               const u = new SpeechSynthesisUtterance(answer);
                               u.onstart = () => setMicState('speaking');
-                              u.onend = () => { setMicState('idle'); try { rec.start(); } catch {} };
+                              u.onend = () => { setMicState('idle'); if (isVoiceActive) { try { rec.start(); } catch {} } };
                               window.speechSynthesis.speak(u);
                             }
                           } catch { setMicState('idle'); }
@@ -750,9 +766,9 @@ const MainContent: React.FC<MainContentProps> = ({
                   } catch {}
                 }
               }}
-              className={`w-24 h-24 rounded-full text-white text-sm font-medium ${micState==='listening' ? 'bg-red-600 animate-pulse' : 'bg-black hover:bg-gray-800'}`}
+              className={`w-24 h-24 rounded-full text-white text-sm font-medium ${isVoiceActive ? (micState==='listening' ? 'bg-red-600 animate-pulse' : 'bg-blue-600') : 'bg-black hover:bg-gray-800'}`}
             >
-              {micState==='listening' ? 'Stop' : 'Mic'}
+              {isVoiceActive ? (micState==='listening' ? 'Stop' : 'Pause') : 'Start'}
             </button>
             {showCaptions && (
               <div className="w-full text-center text-gray-600 text-sm">
@@ -762,7 +778,11 @@ const MainContent: React.FC<MainContentProps> = ({
             <div className="flex items-center justify-center gap-3">
               <button
                 aria-label="Stop audio"
-                onClick={() => { if ('speechSynthesis' in window) window.speechSynthesis.cancel(); setMicState('idle'); }}
+                onClick={() => { 
+                  if ('speechSynthesis' in window) window.speechSynthesis.cancel(); 
+                  setIsVoiceActive(false);
+                  setMicState('idle'); 
+                }}
                 className="px-4 py-2 rounded-lg border border-gray-300 hover:bg-gray-100"
               >Stop Audio</button>
             </div>

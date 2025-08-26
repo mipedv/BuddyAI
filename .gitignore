@@ -52,10 +52,15 @@ yarn-error.log*
 # System Files
 .DS_Store
 Thumbs.db 
+
+# Caches / artifacts
 BuddyAI/backend/hf_cache/
-
 **/.ipynb_checkpoints/
+**/__pycache__/
+.cursor/
+.gradio/
 
-BuddyAI/backend/hf_cache/
-
-**/.ipynb_checkpoints/
+# Env files (keep examples only)
+.env
+.env.local
+.env.*.local

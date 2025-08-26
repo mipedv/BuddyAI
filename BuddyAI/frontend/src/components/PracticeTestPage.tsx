@@ -53,6 +53,8 @@ const PracticeTestPage: React.FC = () => {
   const [correctAnswer, setCorrectAnswer] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [micState, setMicState] = useState<'idle' | 'listening'>('idle');
+  const recognitionRef = useRef<any>(null);
 
   // Test Mode session state
   const [test, setTest] = useState<{ id: string; submitted: boolean; passThreshold: number } | null>(null);
@@ -356,13 +358,64 @@ const PracticeTestPage: React.FC = () => {
               <div className="text-gray-900 mb-3">{current.promptTranslated ?? current.prompt}</div>
 
               {current.type === 'written' ? (
-                <textarea
-                  value={answerTextTranslated || answerText}
-                  onChange={(e) => setAnswerText(e.target.value)}
-                  placeholder={t('writeAnswer')}
-                  dir={pageLang==='ar' ? 'rtl' : 'ltr'}
-                  className="w-full min-h-[120px] border rounded-lg p-3"
-                />
+                <div className="relative">
+                  <textarea
+                    value={answerTextTranslated || answerText}
+                    onChange={(e) => setAnswerText(e.target.value)}
+                    placeholder={t('writeAnswer')}
+                    dir={pageLang==='ar' ? 'rtl' : 'ltr'}
+                    className="w-full min-h-[120px] border rounded-lg p-3 pr-12"
+                  />
+                  {/* Mic Button for written answers */}
+                  <button
+                    onClick={() => {
+                      try {
+                        const SpeechRecognition: any = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+                        if (!SpeechRecognition) { alert('Speech Recognition not supported.'); return; }
+                        if (recognitionRef.current) {
+                          recognitionRef.current.stop();
+                          recognitionRef.current = null;
+                          setMicState('idle');
+                          return;
+                        }
+                        const rec = new SpeechRecognition();
+                        recognitionRef.current = rec;
+                        rec.lang = 'en-US';
+                        rec.interimResults = false;
+                        rec.continuous = false;
+                        rec.onstart = () => setMicState('listening');
+                        rec.onend = () => setMicState('idle');
+                        rec.onerror = () => setMicState('idle');
+                        rec.onresult = (e: any) => {
+                          let finalText = '';
+                          for (let i = 0; i < e.results.length; i++) {
+                            if (e.results[i].isFinal) {
+                              finalText += e.results[i][0].transcript;
+                            }
+                          }
+                          if (finalText.trim()) {
+                            setAnswerText(prev => prev ? prev + ' ' + finalText.trim() : finalText.trim());
+                          }
+                        };
+                        rec.start();
+                      } catch {}
+                    }}
+                    className={`absolute top-2 right-2 w-8 h-8 rounded-full flex items-center justify-center transition-colors ${micState==='listening' ? 'bg-red-600 animate-pulse text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-600'}`}
+                    title="Voice Input"
+                    disabled={!!score}
+                  >
+                    <svg 
+                      xmlns="http://www.w3.org/2000/svg" 
+                      viewBox="0 0 24 24" 
+                      fill="currentColor" 
+                      className="w-4 h-4"
+                    >
+                      <path d="M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3Z"/>
+                      <path d="M19 10v1a7 7 0 0 1-14 0v-1a1 1 0 0 1 2 0v1a5 5 0 0 0 10 0v-1a1 1 0 0 1 2 0Z"/>
+                      <path d="M12 18a1 1 0 0 1 1 1v2a1 1 0 1 1-2 0v-2a1 1 0 0 1 1-1Z"/>
+                    </svg>
+                  </button>
+                </div>
               ) : (
                 <div className="grid grid-cols-1 gap-2">
                   {(current.optionsTranslated ?? current.options ?? []).map((opt, idx) => (

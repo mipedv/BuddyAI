@@ -56,6 +56,7 @@ const ResponsePage: React.FC = () => {
   // Feature states
   const [isVoiceMode, setIsVoiceMode] = useState(false);
   const [micState, setMicState] = useState<'idle' | 'listening' | 'processing' | 'speaking'>('idle');
+  const [isVoiceActive, setIsVoiceActive] = useState(false); // Track if voice should be actively listening
   const recognitionRef = useRef<any>(null);
   const ttsUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   // Voice Session overlay state
@@ -63,7 +64,7 @@ const ResponsePage: React.FC = () => {
   const [sessionTurns, setSessionTurns] = useState<ChatMessage[]>([]);
   const [sessionPartial, setSessionPartial] = useState<string>('');
   const [showCaptions, setShowCaptions] = useState<boolean>(false); // accessibility toggle (off by default)
-  const [sessionStatus, setSessionStatus] = useState<string>('Ready');
+
   const [rating, setRating] = useState<'up' | 'down' | null>(null);
   const [copied, setCopied] = useState(false);
   const [showMoreOptions, setShowMoreOptions] = useState(false);
@@ -518,7 +519,7 @@ const ResponsePage: React.FC = () => {
       utter.onend = () => {
         setMicState('idle');
         // Auto resume listening if still in session
-        if (isVoiceSession) startListeningInSession();
+        if (isVoiceActive) startListeningInSession();
       };
       ttsUtteranceRef.current = utter;
       window.speechSynthesis.speak(utter);
@@ -527,28 +528,22 @@ const ResponsePage: React.FC = () => {
 
   const processVoiceTurn = async (finalText: string) => {
     if (!finalText.trim()) return;
-    const requestedMode = draftMode;
-    // Append user turn to session buffer
-    const userTurn: ChatMessage = { role: 'user', content: finalText.trim(), mode: requestedMode };
-    setSessionTurns(prev => [...prev, userTurn]);
-    setSessionPartial('');
     setMicState('processing');
     try {
-    setIsLoading(true);
-      // Build history: existing chat + session so far + this user turn
-      const tempHistory = [...chatHistory, ...[...sessionTurns, userTurn]];
       const chatResponse = await axios.post(`http://localhost:8000/api/core/chat/`, {
         message: finalText.trim(),
-        level: requestedMode,
-        history: tempHistory,
+        level: draftMode,
+        history: []
       });
-      const { answer, used_mode, mode_notes } = chatResponse.data || {};
-      const assistantTurn: ChatMessage = { role: 'assistant', content: answer || '', used_mode, mode_notes };
-      setSessionTurns(prev => [...prev, assistantTurn]);
-      // Speak the reply
+      const answer = chatResponse.data?.answer || 'No response available.';
+      setSessionTurns(prev => [...prev, 
+        { role: 'user', content: finalText.trim() },
+        { role: 'assistant', content: answer }
+      ]);
+      // Auto-speak the response
       if (answer) startTTS(answer);
     } catch {
-      // Ignore errors in MVP loop
+      // Ignore errors in voice mode
     } finally {
       setIsLoading(false);
     }
@@ -567,16 +562,16 @@ const ResponsePage: React.FC = () => {
       rec.lang = 'en-US';
       rec.interimResults = true;
       rec.continuous = false; // single utterance; we'll restart on end
-      rec.onstart = () => { setMicState('listening'); setSessionStatus('Listening…'); };
+      rec.onstart = () => { setMicState('listening'); };
       rec.onend = () => {
-        if (isVoiceSession && micState !== 'speaking') {
+        if (isVoiceActive && micState !== 'speaking') {
           // Keep listening loop if session ongoing
           try { rec.start(); } catch {}
         } else {
           setMicState('idle');
         }
       };
-      rec.onerror = (e: any) => { setMicState('idle'); setSessionStatus(e?.error || 'Mic error'); };
+      rec.onerror = (e: any) => { setMicState('idle'); };
       rec.onresult = (e: any) => {
         let interim = '';
         let finalText = '';
@@ -598,9 +593,10 @@ const ResponsePage: React.FC = () => {
 
   const openVoiceSession = () => {
     setIsVoiceSession(true);
+    setIsVoiceActive(true); // Start voice mode as active
     setSessionTurns([]);
     setSessionPartial('');
-    setSessionStatus('Ready');
+
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     // Pre-warm mic permission, then start listening
     if (navigator.mediaDevices?.getUserMedia) {
@@ -618,19 +614,14 @@ const ResponsePage: React.FC = () => {
 
   const closeVoiceSession = () => {
     setIsVoiceSession(false);
+    setIsVoiceActive(false); // Stop voice mode completely
     try { if (recognitionRef.current) recognitionRef.current.stop(); } catch {}
     recognitionRef.current = null;
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     setMicState('idle');
-    // Append buffered session turns to main chat history
-    if (sessionTurns.length > 0) {
-      setChatHistory(prev => [...prev, ...sessionTurns]);
-      // Update response panel with latest assistant answer if present
-      const lastAssistant = [...sessionTurns].reverse().find(t => t.role === 'assistant');
-      if (lastAssistant) {
-        setResponse((prev: any) => ({ ...(prev || {}), answer: lastAssistant.content }));
-      }
-    }
+    // Voice session stays separate - no text conversation mixing
+    setSessionTurns([]);
+    setSessionPartial('');
   };
 
   // Simple text selection handlers
@@ -1954,21 +1945,24 @@ const ResponsePage: React.FC = () => {
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-16 h-16 text-gray-600"><path d="M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3Z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1a1 1 0 0 1 2 0v1a5 5 0 0 0 10 0v-1a1 1 0 0 1 2 0Z"/><path d="M12 18a1 1 0 0 1 1 1v2a1 1 0 1 1-2 0v-2a1 1 0 0 1 1-1Z"/></svg>
             </div>
             <button
-              aria-label={micState==='listening' ? 'Stop listening' : 'Start listening'}
+              aria-label={isVoiceActive ? 'Stop Voice Mode' : 'Start Voice Mode'}
               onClick={() => {
-                if (micState==='speaking' && 'speechSynthesis' in window) {
-                  window.speechSynthesis.cancel();
+                if (micState==='speaking' && 'speechSynthesis' in window) { window.speechSynthesis.cancel(); }
+                if (isVoiceActive) { 
+                  // Stop voice mode
+                  setIsVoiceActive(false);
+                  try { if (recognitionRef.current) recognitionRef.current.stop(); } catch {}; 
+                  setMicState('idle'); 
                 }
-                if (micState==='listening') {
-                  try { if (recognitionRef.current) recognitionRef.current.stop(); } catch {}
-                  setMicState('idle');
-                } else {
+                else {
+                  // Start voice mode
+                  setIsVoiceActive(true);
                   startListeningInSession();
                 }
               }}
-              className={`w-24 h-24 rounded-full text-white text-sm font-medium ${micState==='listening' ? 'bg-red-600 animate-pulse' : 'bg-black hover:bg-gray-800'}`}
+              className={`w-24 h-24 rounded-full text-white text-sm font-medium ${isVoiceActive ? (micState==='listening' ? 'bg-red-600 animate-pulse' : 'bg-blue-600') : 'bg-black hover:bg-gray-800'}`}
             >
-              {micState==='listening' ? 'Stop' : 'Mic'}
+              {isVoiceActive ? (micState==='listening' ? 'Stop' : 'Pause') : 'Start'}
             </button>
             {showCaptions && (
               <div className="w-full text-center text-gray-600 text-sm">
@@ -1978,7 +1972,11 @@ const ResponsePage: React.FC = () => {
             <div className="flex items-center justify-center gap-3">
               <button
                 aria-label="Stop audio"
-                onClick={() => { if ('speechSynthesis' in window) window.speechSynthesis.cancel(); setMicState('idle'); }}
+                onClick={() => { 
+                  if ('speechSynthesis' in window) window.speechSynthesis.cancel(); 
+                  setIsVoiceActive(false);
+                  setMicState('idle'); 
+                }}
                 className="px-4 py-2 rounded-lg border border-gray-300 hover:bg-gray-100"
               >Stop Audio</button>
             </div>
