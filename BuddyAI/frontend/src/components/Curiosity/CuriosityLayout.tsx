@@ -133,7 +133,7 @@ const InnerLayout: React.FC = () => {
               if (mode === 'ar-en') setPageLang('en');
             }} />
           </div>
-          <HeaderRight />
+          <HeaderRight pageLang={'en'} />
         </div>
 
         {/* Main panel */}

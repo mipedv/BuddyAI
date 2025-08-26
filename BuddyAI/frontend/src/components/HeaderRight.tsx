@@ -1,13 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-const HeaderRight: React.FC = () => {
+type AppLang = 'en' | 'ar';
+
+interface HeaderRightProps {
+    pageLang?: AppLang;
+}
+
+const HeaderRight: React.FC<HeaderRightProps> = ({ pageLang: pageLangProp }) => {
     const [user, setUser] = useState({
         name: '',
         class: ''
     });
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const navigate = useNavigate();
+    const pageLang: AppLang = (pageLangProp || (localStorage.getItem('pageLang') as AppLang) || 'en');
 
     useEffect(() => {
         // Retrieve user data from local storage or authentication context
@@ -29,6 +36,10 @@ const HeaderRight: React.FC = () => {
         navigate('/login');
     };
 
+    const labels = pageLang === 'ar'
+        ? { profile: 'ملفي', settings: 'الإعدادات', logout: 'تسجيل الخروج' }
+        : { profile: 'My Profile', settings: 'Settings', logout: 'Logout' };
+
     return (
         <div className="flex items-center gap-x-6 bg-[#f6f6f1] p-2 rounded-lg">
             {/* Notification Bell */}
@@ -46,7 +57,7 @@ const HeaderRight: React.FC = () => {
                     alt="UAE Flag" 
                     className="w-6 h-4 rounded"
                 />
-                <span className="text-sm">English</span>
+                <span className="text-sm">{pageLang === 'ar' ? 'العربية' : 'English'}</span>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path d="M7 10l5 5 5-5z" fill="currentColor"/>
                 </svg>
@@ -62,9 +73,11 @@ const HeaderRight: React.FC = () => {
                     alt="User Profile" 
                     className="w-10 h-10 rounded-full object-cover"
                 />
-                <div>
-                    <p className="font-bold text-sm">{user.name}</p>
-                    <p className="text-xs text-gray-500">{user.class}</p>
+                <div className={pageLang === 'ar' ? 'text-right' : ''}>
+                    <p className="font-bold text-sm" dir={pageLang === 'ar' ? 'rtl' : 'ltr'}>{user.name}</p>
+                    <p className="text-xs text-gray-500" dir={pageLang === 'ar' ? 'rtl' : 'ltr'}>
+                        {pageLang === 'ar' && user.class === '7th Standard' ? 'الصف السابع' : user.class}
+                    </p>
                 </div>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path d="M7 10l5 5 5-5z" fill="currentColor"/>
@@ -72,25 +85,25 @@ const HeaderRight: React.FC = () => {
 
                 {/* Dropdown Menu */}
                 {isDropdownOpen && (
-                    <div className="absolute top-full right-0 mt-2 w-48 bg-white shadow-lg rounded-lg z-50">
+                    <div className={`absolute top-full right-0 mt-2 w-48 bg-white shadow-lg rounded-lg z-50 ${pageLang==='ar' ? 'text-right' : ''}`} dir={pageLang==='ar' ? 'rtl' : 'ltr'}>
                         <ul className="py-1">
                             <li 
                                 className="px-4 py-2 hover:bg-gray-100 cursor-pointer"
                                 onClick={() => navigate('/profile')}
                             >
-                                My Profile
+                                {labels.profile}
                             </li>
                             <li 
                                 className="px-4 py-2 hover:bg-gray-100 cursor-pointer"
                                 onClick={() => {/* Navigate to settings */}}
                             >
-                                Settings
+                                {labels.settings}
                             </li>
                             <li 
                                 className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-red-500"
                                 onClick={handleLogout}
                             >
-                                Logout
+                                {labels.logout}
                             </li>
                         </ul>
                     </div>

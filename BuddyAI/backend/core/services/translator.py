@@ -2,6 +2,8 @@ import os
 import re
 import time
 from typing import Optional, Tuple, Dict, Any
+from dotenv import load_dotenv
+load_dotenv()
 
 import requests
 
@@ -182,21 +184,27 @@ class LLMTranslator(TranslatorProviderBase):
         if not self.is_configured():
             raise TranslatorError("LLM translator not configured")
         detected = source_lang or ("ar" if is_arabic_text(text) else "en")
-        prompt = (
-            f"You are a professional translator. Translate the following text from {detected.upper()} to {target_lang.upper()} "
-            f"accurately and naturally. Preserve meaning and tone. Output ONLY the translated text with no explanations.\n\n"
-            f"Text:\n{text}"
-        )
         try:
             llm = self._get_client()
-            # Use timeout via requests adapter is not trivial here; rely on gateway timeout limits
-            result = llm.invoke([HumanMessage(content=prompt)])  # type: ignore[misc]
-            translated = (getattr(result, "content", None) or "").strip()
-            if not translated:
-                raise TranslatorError("Empty translation result")
+            chunks = split_text_into_chunks(text, max_chars=1000)
+            outputs: list[str] = []
+            for chunk in chunks:
+                prompt = (
+                    f"You are a professional translator. Translate the following text from {detected.upper()} to {target_lang.upper()} "
+                    f"accurately and naturally. Preserve meaning and tone. Output ONLY the translated text with no explanations.\n\n"
+                    f"Text:\n{chunk}"
+                )
+                result = llm.invoke([HumanMessage(content=prompt)])  # type: ignore[misc]
+                part = (getattr(result, "content", None) or "").strip()
+                outputs.append(part)
+            translated = "\n".join([p for p in outputs if p])
+            # Final safety: never return empty; fall back to original
+            if not translated.strip():
+                translated = text
             return translated, detected
-        except Exception as e:
-            raise TranslatorError(str(e))
+        except Exception:
+            # On any error, return original text to avoid blank UI
+            return text, detected
 
 
 def get_translator() -> TranslatorProviderBase:
@@ -204,9 +212,17 @@ def get_translator() -> TranslatorProviderBase:
     api_key = os.getenv("TRANSLATOR_API_KEY")
     endpoint = os.getenv("TRANSLATOR_ENDPOINT")
     region = os.getenv("TRANSLATOR_REGION")
-    # LLM translator (DeepSeek via OpenAI-compatible API)
-    llm_api_key = os.getenv("LLM_TRANSLATOR_API_KEY") or os.getenv("OPENAI_API_KEY")
-    llm_base_url = os.getenv("LLM_TRANSLATOR_API_BASE") or os.getenv("OPENAI_BASE_URL")
+    # LLM translator (DeepSeek preferred; support OpenRouter/OpenAI as fallback)
+    llm_api_key = os.getenv("LLM_TRANSLATOR_API_KEY") or os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY")
+    llm_base_url = (
+        os.getenv("LLM_TRANSLATOR_API_BASE")
+        or os.getenv("DEEPSEEK_API_BASE")
+        or os.getenv("OPENROUTER_BASE_URL")
+        or os.getenv("OPENAI_BASE_URL")
+    )
+    # If DeepSeek key is configured but no base is provided, default to DeepSeek API base
+    if not llm_base_url and os.getenv("DEEPSEEK_API_KEY"):
+        llm_base_url = "https://api.deepseek.com/v1"
 
     # Explicit providers first
     if provider == "google":
@@ -222,7 +238,7 @@ def get_translator() -> TranslatorProviderBase:
         return LLMTranslator(api_key=llm_api_key, base_url=llm_base_url, model=os.getenv("LLM_TRANSLATOR_MODEL"))
 
     # Fallback: if LLM creds are present, use LLM translator even without provider set
-    if llm_api_key and (llm_base_url or True):  # base_url optional for some gateways
+    if llm_api_key:
         return LLMTranslator(api_key=llm_api_key, base_url=llm_base_url, model=os.getenv("LLM_TRANSLATOR_MODEL"))
 
     # No provider configured
@@ -239,7 +255,7 @@ class NoOpTranslator(TranslatorProviderBase):
 
 # Simple in-process rate limiter
 class RateLimiter:
-    def __init__(self, max_per_minute: int = 30):
+    def __init__(self, max_per_minute: int = 120):
         self.max_per_minute = max_per_minute
         self.window_start = 0.0
         self.count = 0

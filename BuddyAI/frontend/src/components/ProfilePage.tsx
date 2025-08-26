@@ -123,7 +123,7 @@ const ProfilePage: React.FC = () => {
                 </div>
               )}
             </div>
-            <HeaderRight />
+            <HeaderRight pageLang={'en'} />
           </div>
         </div>
 

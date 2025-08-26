@@ -8,11 +8,26 @@ const EXPLANATION_TYPES = [
 
 interface ExplanationSelectorProps {
   onSelect?: (type: string) => void;
+  pageLang?: 'en' | 'ar';
 }
 
-const ExplanationSelector: React.FC<ExplanationSelectorProps> = ({ onSelect }) => {
+const ExplanationSelector: React.FC<ExplanationSelectorProps> = ({ onSelect, pageLang = 'en' }) => {
   const [selectedType, setSelectedType] = useState(EXPLANATION_TYPES[0]);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+
+  const t = (type: string) => {
+    if (pageLang !== 'ar') return type;
+    switch (type) {
+      case 'Textbook Explanation':
+        return 'شرح من الكتاب';
+      case 'Detailed Explanation':
+        return 'شرح مفصل';
+      case 'Advanced Explanation':
+        return 'شرح متقدم';
+      default:
+        return type;
+    }
+  };
 
   const handleSelect = (type: string) => {
     setSelectedType(type);
@@ -30,7 +45,7 @@ const ExplanationSelector: React.FC<ExplanationSelectorProps> = ({ onSelect }) =
         className="flex items-center space-x-1 text-sm text-gray-700 hover:text-blue-600 transition-colors 
         bg-[#f6f6f1] px-3 py-1.5 rounded-lg border border-transparent hover:border-gray-200"
       >
-        <span>{selectedType}</span>
+        <span>{t(selectedType)}</span>
         <svg 
           xmlns="http://www.w3.org/2000/svg" 
           className="h-4 w-4 text-gray-500" 
@@ -53,7 +68,7 @@ const ExplanationSelector: React.FC<ExplanationSelectorProps> = ({ onSelect }) =
               onClick={() => handleSelect(type)}
               className="block w-full text-left px-4 py-2 hover:bg-gray-50 text-sm text-gray-600"
             >
-              {type}
+              {t(type)}
             </button>
           ))}
         </div>

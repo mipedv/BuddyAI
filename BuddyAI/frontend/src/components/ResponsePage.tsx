@@ -95,7 +95,7 @@ const ResponsePage: React.FC = () => {
   }
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [autoTranslateToArabic, setAutoTranslateToArabic] = useState<boolean>(false);
-  const [translationAvailable, setTranslationAvailable] = useState<boolean>(false);
+  const [translationAvailable, setTranslationAvailable] = useState<boolean>(true);
   const [translateOpen, setTranslateOpen] = useState(false);
   const [pageLang, setPageLang] = useState<'en' | 'ar'>('en');
   const [titleTranslated, setTitleTranslated] = useState<string | null>(null);
@@ -223,9 +223,11 @@ const ResponsePage: React.FC = () => {
     (async () => {
       try {
         const res = await axios.get(`http://localhost:8000/api/core/translate/status/`);
-        setTranslationAvailable(!!res.data?.configured);
-      } catch {
-        setTranslationAvailable(false);
+        console.log('Translation status response:', res.data);
+        setTranslationAvailable(true); // do not gate; attempt translation regardless
+      } catch (error) {
+        console.error('Translation status check failed (non-blocking):', error);
+        setTranslationAvailable(true); // still allow translation attempts
       }
     })();
 
@@ -325,8 +327,9 @@ const ResponsePage: React.FC = () => {
 
   // Centralized translation toggle (matches HomePage behavior)
   useEffect(() => {
-    if (!translationAvailable) return;
+    console.log('Translation effect triggered:', { autoTranslateToArabic, chatHistoryLength: chatHistory.length });
     if (!autoTranslateToArabic) {
+      console.log('Disabling translation - resetting states');
       setChatHistory(prev => prev.map(m => ({
         ...m,
         showTranslation: false,
@@ -334,50 +337,75 @@ const ResponsePage: React.FC = () => {
         translatedTo: undefined,
       })));
       setSqShowTranslation(false);
+      setSqTranslated(null);
       setTitleShowTranslation(false);
       setTitleTranslated(null);
+      setRspSummaryShowTranslation(false);
+      setRspSummaryTranslated(null);
       return;
     }
 
+    console.log('Starting translation process...');
     (async () => {
       // Translate existing chat messages to Arabic (skip already-AR)
       for (let i = 0; i < chatHistory.length; i++) {
         const m = chatHistory[i];
         const baseText = m.originalText || m.content;
         const currentLang = m.language || detectLang(baseText);
+        console.log(`Message ${i}:`, { role: m.role, currentLang, hasTranslation: !!m.translatedText, showTranslation: m.showTranslation });
+        if (m.role !== 'assistant') continue;
         if (currentLang === 'ar') continue;
+        if (m.showTranslation && m.translatedText && m.translatedText !== '...') continue;
         // show placeholder
-        setChatHistory(prev => prev.map((mm, idx) => idx === i ? { ...mm, translatedText: '...', translatedTo: 'ar', showTranslation: true } : mm));
+        console.log(`Translating message ${i}:`, baseText.substring(0, 100));
         try {
           const { text } = await translateText(baseText, 'ar', 'en');
-          setChatHistory(prev => prev.map((mm, idx) => idx === i ? { ...mm, language: 'en', originalText: baseText, translatedText: text, translatedTo: 'ar', showTranslation: true } : mm));
-        } catch {
+          console.log(`Translation result for message ${i}:`, text.substring(0, 100));
+          setChatHistory(prev => prev.map((mm, idx) => idx === i ? { 
+            ...mm, 
+            language: 'en', 
+            originalText: baseText, 
+            translatedText: text, 
+            translatedTo: 'ar', 
+            showTranslation: true 
+          } : mm));
+          console.log(`Message ${i} state updated with translation`);
+        } catch (error) {
+          console.error(`Translation failed for message ${i}:`, error);
           setChatHistory(prev => prev.map((mm, idx) => idx === i ? { ...mm, showTranslation: false } : mm));
         }
       }
 
-      // Translate Suggested Questions once
+      // Translate Suggested Questions (re-translate if content changes)
       if (response?.suggested_questions && response.suggested_questions.length > 0) {
+        console.log('Translating suggested questions:', response.suggested_questions);
         try {
           setSqTranslating(true);
           const translated = await translateArray(response.suggested_questions, 'ar', 'en');
+          console.log('Suggested questions translated:', translated);
           setSqTranslated(translated);
           setSqShowTranslation(true);
+        } catch (error) {
+          console.error('Failed to translate suggested questions:', error);
+          setSqShowTranslation(false);
         } finally {
           setSqTranslating(false);
         }
       }
 
-      // Translate title/query
+      // Translate title/query (re-translate if content changes)
       if (response?.query) {
         const q = response.query;
         const lang = isArabic(q) ? 'ar' : 'en';
+        console.log('Translating title:', { query: q, lang });
         if (lang === 'en') {
           try {
             const { text } = await translateText(q, 'ar', 'en');
+            console.log('Title translated:', text);
             setTitleTranslated(text);
             setTitleShowTranslation(true);
-          } catch {
+          } catch (error) {
+            console.error('Failed to translate title:', error);
             setTitleTranslated(null);
             setTitleShowTranslation(false);
           }
@@ -386,8 +414,47 @@ const ResponsePage: React.FC = () => {
           setTitleShowTranslation(true);
         }
       }
+
+      // Auto-translate Summary if response exists
+      if (response?.answer && !rspSummaryShowTranslation) {
+        try {
+          console.log('Auto-translating summary');
+          setRspSummaryTranslating(true);
+          const summaryItems = generateSummary(response.answer);
+          const translated = await translateArray(summaryItems, 'ar', 'en');
+          setRspSummaryTranslated(translated);
+          setRspSummaryShowTranslation(true);
+        } catch (error) {
+          console.error('Failed to auto-translate summary:', error);
+        } finally {
+          setRspSummaryTranslating(false);
+        }
+      }
     })();
-  }, [autoTranslateToArabic, translationAvailable]);
+  }, [autoTranslateToArabic, response?.suggested_questions, response?.query, response?.answer]);
+
+  // Robust: if messages are appended later, ensure they get translated when Arabic is active
+  useEffect(() => {
+    if (!autoTranslateToArabic) return;
+    (async () => {
+      // Find assistant messages without translation
+      for (let i = 0; i < chatHistory.length; i++) {
+        const m = chatHistory[i];
+        if (m.role !== 'assistant') continue;
+        const baseText = m.originalText || m.content;
+        const currentLang = m.language || detectLang(baseText);
+        if (currentLang === 'ar') continue;
+        if (m.showTranslation && m.translatedText) continue;
+        setChatHistory(prev => prev.map((mm, idx) => idx === i ? { ...mm, translatedText: '...', translatedTo: 'ar', showTranslation: true } : mm));
+        try {
+          const { text } = await translateText(baseText, 'ar', 'en');
+          setChatHistory(prev => prev.map((mm, idx) => idx === i ? { ...mm, language: 'en', originalText: baseText, translatedText: text, translatedTo: 'ar', showTranslation: true } : mm));
+        } catch {
+          setChatHistory(prev => prev.map((mm, idx) => idx === i ? { ...mm, showTranslation: false } : mm));
+        }
+      }
+    })();
+  }, [chatHistory.length, autoTranslateToArabic]);
 
   if (!response) {
     return (
@@ -1111,8 +1178,18 @@ const ResponsePage: React.FC = () => {
                           onClick={() => {
                             setTranslateOpen(false);
                             if (!opt.active) return;
-                            if (opt.key==='en-ar') { if (!autoTranslateToArabic) setAutoTranslateToArabic(true); setPageLang('ar'); }
-                            if (opt.key==='ar-en') { if (autoTranslateToArabic) setAutoTranslateToArabic(false); setPageLang('en'); }
+                            if (opt.key==='en-ar') { 
+                              console.log('Enabling Arabic translation - ResponsePage');
+                              console.log('Current states:', { autoTranslateToArabic, sqShowTranslation, sqTranslated: !!sqTranslated });
+                              if (!autoTranslateToArabic) setAutoTranslateToArabic(true); 
+                              setPageLang('ar'); 
+                            }
+                            if (opt.key==='ar-en') { 
+                              console.log('Disabling Arabic translation - ResponsePage');
+                              console.log('Current states:', { autoTranslateToArabic, sqShowTranslation, sqTranslated: !!sqTranslated });
+                              if (autoTranslateToArabic) setAutoTranslateToArabic(false); 
+                              setPageLang('en'); 
+                            }
                           }}
                           className={`block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 ${isActive ? 'font-bold' : ''}`}
                         >
@@ -1349,7 +1426,10 @@ const ResponsePage: React.FC = () => {
                               dir={(msg.showTranslation && msg.translatedTo === 'ar') ? 'rtl' : 'ltr'}
                               className={(msg.showTranslation && msg.translatedTo === 'ar') ? 'text-right' : 'text-left'}
                             >
-                              {msg.showTranslation ? (msg.translatedText || msg.content) : msg.content}
+                              {(() => {
+                                console.log(`Rendering message: showTranslation=${msg.showTranslation}, translatedText="${msg.translatedText?.substring(0, 50)}...", content="${msg.content?.substring(0, 50)}...", autoTranslateToArabic=${autoTranslateToArabic}`);
+                                return msg.showTranslation ? (msg.translatedText || msg.content) : msg.content;
+                              })()}
                             </div>
                           </div>
                         </div>
@@ -1401,10 +1481,13 @@ const ResponsePage: React.FC = () => {
                 </button>
                 <button 
                     onClick={() => handleRewrite(chatHistory.length - 1)}
-                  className={`flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  disabled={isLoading}
+                  className={`flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 ${
+                    (isLoading || isRewriting[chatHistory.length - 1]) ? 'opacity-50 cursor-wait' : ''
+                  }`}
+                  disabled={isLoading || !!isRewriting[chatHistory.length - 1]}
+                  aria-busy={!!isRewriting[chatHistory.length - 1]}
                 >
-                  <RefreshCw className="w-4 h-4" />
+                  <RefreshCw className={`w-4 h-4 ${isRewriting[chatHistory.length - 1] ? 'animate-spin' : ''}`} />
                   {t('rewrite')}
                   </button>
                   <button 
@@ -1418,9 +1501,9 @@ const ResponsePage: React.FC = () => {
                   <div className="relative">
                     <button 
                       onClick={() => setShowMoreOptions(!showMoreOptions)}
-                      className={`flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      disabled={isLoading}
-                    >
+                  className={`flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  disabled={isLoading}
+                >
                       <MoreHorizontal className="w-4 h-4" />
                     </button>
                     {showMoreOptions && (
@@ -1469,7 +1552,17 @@ const ResponsePage: React.FC = () => {
                       <span className="text-gray-600">Loading new questions...</span>
                     </div>
                   ) : (
-                    (sqShowTranslation && sqTranslated ? sqTranslated : response.suggested_questions).map((question: string, index: number) => (
+                    (() => {
+                      const questionsToShow = sqShowTranslation && sqTranslated ? sqTranslated : response.suggested_questions;
+                      console.log('Rendering suggested questions:', { 
+                        sqShowTranslation, 
+                        hasSqTranslated: !!sqTranslated, 
+                        sqTranslated: sqTranslated?.slice(0, 2),
+                        originalQuestions: response.suggested_questions?.slice(0, 2),
+                        questionsToShow: questionsToShow?.slice(0, 2) 
+                      });
+                      return questionsToShow;
+                    })().map((question: string, index: number) => (
                       <button
                         key={index}
                         onClick={() => {

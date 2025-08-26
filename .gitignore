@@ -20,7 +20,7 @@ wheels/
 .installed.cfg
 *.egg
 MANIFEST
-.env
+
 .venv
 env/
 venv/
@@ -41,10 +41,6 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
 
 # IDEs and editors
 .idea/

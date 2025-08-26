@@ -193,25 +193,33 @@ const MainContent: React.FC<MainContentProps> = ({
   };
 
   const toggleAllTopicsLanguage = async () => {
+    console.log('toggleAllTopicsLanguage called, current state:', { topicsTranslating, topicsShowTranslation });
     if (topicsTranslating) return;
     setTopicsTranslating(true);
     try {
       if (!topicsShowTranslation) {
         // EN -> AR
+        console.log('Translating topics to Arabic:', suggestedTopics.map(t => t.label));
         const translated = await Promise.all(suggestedTopics.map(async (t) => {
           const key = `ar:${t.label}`;
           const cached = topicTranslateCacheRef.current.get(key);
-          if (cached) return { ...t, label: cached };
+          if (cached) return { ...t, label: cached, originalLabel: t.originalLabel || t.label };
           const out = await translateText(t.label, 'ar', 'en');
+          console.log(`Translated "${t.label}" -> "${out}"`);
           topicTranslateCacheRef.current.set(key, out);
-          return { ...t, label: out };
+          return { ...t, label: out, originalLabel: t.originalLabel || t.label };
         }));
+        console.log('Translated topics:', translated.map(t => t.label));
+        console.log('Full translated objects:', translated);
         setSuggestedTopics(translated);
         setTopicsShowTranslation(true);
+        console.log('Set topicsShowTranslation to true');
       } else {
         // AR -> EN (restore originals)
+        console.log('Reverting topics to English');
         setSuggestedTopics(prev => prev.map(t => ({ ...t, label: t.originalLabel || t.label })));
         setTopicsShowTranslation(false);
+        console.log('Set topicsShowTranslation to false');
       }
     } finally {
       setTopicsTranslating(false);
@@ -376,10 +384,25 @@ const MainContent: React.FC<MainContentProps> = ({
                       }
                       if (opt.key === 'en-ar') {
                         setPageLang('ar');
-                        if (!topicsShowTranslation) await toggleAllTopicsLanguage();
+                        console.log('EN->AR: translating topics, current state:', topicsShowTranslation);
+                        if (!topicsShowTranslation) {
+                          console.log('Calling toggleAllTopicsLanguage for EN->AR');
+                          await toggleAllTopicsLanguage();
+                        } else {
+                          console.log('Topics already translated, but forcing retranslation for debugging');
+                          // Force retranslation by resetting state first
+                          setTopicsShowTranslation(false);
+                          await toggleAllTopicsLanguage();
+                        }
                       } else if (opt.key === 'ar-en') {
                         setPageLang('en');
-                        if (topicsShowTranslation) await toggleAllTopicsLanguage();
+                        console.log('AR->EN: reverting topics, current state:', topicsShowTranslation);
+                        if (topicsShowTranslation) {
+                          console.log('Calling toggleAllTopicsLanguage for AR->EN');
+                          await toggleAllTopicsLanguage();
+                        } else {
+                          console.log('Topics already in English, skipping');
+                        }
                       }
                     }}
                     className="block w-full text-left px-3 py-2 text-sm hover:bg-gray-100"
@@ -410,7 +433,7 @@ const MainContent: React.FC<MainContentProps> = ({
           </button>
           
 
-          <HeaderRight />
+          <HeaderRight pageLang={pageLang} />
           </div>
       </div>
 
@@ -442,9 +465,7 @@ const MainContent: React.FC<MainContentProps> = ({
         {/* Search Input with Explanation Selector */}
         <div className="w-full max-w-2xl relative">
           <div className="flex items-center space-x-2 mb-2 justify-end">
-            <div className="bg-[#f6f6f1] px-3 py-1.5 rounded-lg border border-transparent text-sm text-gray-700">
-              {t('textbookExplanation')}
-            </div>
+            <ExplanationSelector onSelect={(type)=> setExplanationType(type)} pageLang={pageLang} />
           </div>
 
           <div className="relative flex items-center">
@@ -617,7 +638,16 @@ const MainContent: React.FC<MainContentProps> = ({
             <div className="mt-6 w-full max-w-2xl mx-auto">
               {/* Removed per-topics toggle chip as requested */}
               <div className="grid grid-cols-2 gap-4">
-                {suggestedTopics.map((topic) => (
+                {(() => {
+                  console.log('Rendering suggested topics:', { 
+                    topicsShowTranslation, 
+                    topicsCount: suggestedTopics.length,
+                    actualLabels: suggestedTopics.map(t => t.label),
+                    originalLabels: suggestedTopics.map(t => t.originalLabel),
+                    fullTopics: suggestedTopics
+                  });
+                  return suggestedTopics;
+                })().map((topic) => (
                   <button
                     key={topic.label + (topic.originalLabel || '')}
                     onClick={() => handleTopicClick(topic.label)}

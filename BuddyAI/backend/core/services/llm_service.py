@@ -14,10 +14,10 @@ from langchain.schema import Document, HumanMessage
 from langchain_community.vectorstores import Chroma
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
-from langchain_openai import ChatOpenAI
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain.retrievers import EnsembleRetriever
 from langchain_community.retrievers import BM25Retriever
+from openai import OpenAI
 
 # Load environment variables
 load_dotenv()
@@ -35,48 +35,59 @@ class LLMService:
     
     def __init__(self):
         """Initialize all service components."""
+        # Predefine routing/config to avoid attribute errors if init partially fails
+        self.mode_config: Dict[str, Any] = {}
+        self.task_router: Dict[str, Any] = {}
         self._validate_environment()
         self._initialize_core_components()
         self._initialize_prompts()
         self._initialize_textbook_vector_store()
     
     def _validate_environment(self):
-        """Validate required environment variables."""
-        # Try LLM Translator key first
-        self.openai_api_key = os.getenv('LLM_TRANSLATOR_API_KEY')
-        
-        # If LLM Translator key is not set, try OpenAI key
+        """Validate required environment variables (OpenAI only)."""
+        self.openai_api_key = os.getenv('OPENAI_API_KEY')
         if not self.openai_api_key:
-            self.openai_api_key = os.getenv('OPENAI_API_KEY')
-        
-        if not self.openai_api_key:
-            raise ValueError("No API key found for LLM. Please set LLM_TRANSLATOR_API_KEY or OPENAI_API_KEY.")
+            raise ValueError("OPENAI_API_KEY is not set.")
     
     def _initialize_core_components(self):
         """Initialize LLM, embeddings, and memory components."""
-        # Initialize embeddings
-        self.embeddings = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2"
-        )
+        # Initialize embeddings (OpenAI only)
+        oa_embed_model = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+        self.embeddings = OpenAIEmbeddings(model=oa_embed_model, openai_api_key=self.openai_api_key)
         
         # Initialize LLM with different temperatures for different modes
+        base_url = os.getenv("OPENAI_API_BASE") or "https://api.openai.com/v1"
         self.llm_textbook = ChatOpenAI(
-            temperature=0.1,  # Very low for textbook accuracy
-            model="deepseek-chat",
-            openai_api_key=self.openai_api_key
+            temperature=0.1,
+            model=os.getenv("LLM_MODEL_TEXTBOOK") or "gpt-4o-mini",
+            openai_api_key=self.openai_api_key,
+            base_url=base_url,
         )
-        
         self.llm_detailed = ChatOpenAI(
-            temperature=0.3,  # Medium for detailed explanations
-            model="deepseek-chat", 
-            openai_api_key=self.openai_api_key
+            temperature=0.3,
+            model=os.getenv("LLM_MODEL_DETAILED") or "gpt-4o-mini",
+            openai_api_key=self.openai_api_key,
+            base_url=base_url,
+        )
+        self.llm_advanced = ChatOpenAI(
+            temperature=0.7, 
+            model=os.getenv("LLM_MODEL_ADVANCED") or "gpt-4o",
+            openai_api_key=self.openai_api_key,
+            base_url=base_url,
         )
         
-        self.llm_advanced = ChatOpenAI(
-            temperature=0.7,  # Higher for creative advanced explanations
-            model="deepseek-chat",
-            openai_api_key=self.openai_api_key
-        )
+        # Task routing for providers/models per feature (using real OpenAI models)
+        self.task_router = {
+            "chat": {
+                "textbook": {"provider": "openai", "model": os.getenv("LLM_MODEL_TEXTBOOK") or "gpt-4o-mini"},
+                "detailed": {"provider": "openai", "model": os.getenv("LLM_MODEL_DETAILED") or "gpt-4o-mini"},
+                "advanced": {"provider": "openai", "model": os.getenv("LLM_MODEL_ADVANCED") or "gpt-4o"},
+            },
+            "practice": {
+                "generation": {"provider": "openai", "model": os.getenv("LLM_MODEL_PRACTICE_GEN") or "gpt-4o-mini"},
+                "scoring": {"provider": "openai", "model": os.getenv("LLM_MODEL_PRACTICE_SCORE") or "gpt-4o-mini"},
+            },
+        }
         
         # Default LLM (for backward compatibility)
         self.llm = self.llm_textbook
@@ -91,78 +102,164 @@ class LLMService:
         self.textbook_vectorstore = None
         self.conversation_chain = None
         
-        # Mode-specific configurations
+        # Mode-specific configurations (used for chunk limits and status)
         self.mode_config = {
             "textbook": {
                 "max_chunks": 3,
                 "llm": self.llm_textbook,
                 "strict_textbook_only": True,
-                "description": "Uses ONLY textbook.pdf content"
+                "description": "Uses ONLY textbook.pdf content",
             },
             "detailed": {
                 "max_chunks": 4,
                 "llm": self.llm_detailed,
                 "strict_textbook_only": False,
-                "description": "Uses textbook + LLM enhancement"
+                "description": "Uses textbook + LLM enhancement",
             },
             "advanced": {
                 "max_chunks": 2,
                 "llm": self.llm_advanced,
                 "strict_textbook_only": False,
-                "description": "Uses primarily LLM knowledge"
-            }
+                "description": "Uses primarily LLM knowledge",
+            },
         }
+
+    def _openai_client(self) -> OpenAI:
+        """Create OpenAI client (OpenAI only)."""
+        api_key = self.openai_api_key
+        base_url = os.getenv("OPENAI_API_BASE") or "https://api.openai.com/v1"
+        return OpenAI(api_key=api_key, base_url=base_url)
+
+    def _openai_chat(self, model: str, system: str, messages: list[dict], *, max_output_tokens: int, temperature: float = 0.2, top_p: float = 1.0) -> str:
+        """Unified chat call with retry and fallback from gpt-4o → gpt-4o-mini.
+        Uses max_tokens for all current OpenAI models.
+        """
+        client = self._openai_client()
+        attempt_models = [model]
+        if model == "gpt-4o":
+            attempt_models.append("gpt-4o-mini")
+        last_err: Optional[Exception] = None
+        for m in attempt_models:
+            for attempt in range(3):
+                try:
+                    token_key = "max_tokens"  # Standard for all current OpenAI models
+                    payload = {
+                        "model": m,
+                        "messages": ([{"role": "system", "content": system}] + messages),
+                        "temperature": temperature,
+                        "top_p": top_p,
+                        token_key: max_output_tokens,
+                    }
+                    print(f"LLM call → provider=openai model={m} mtok={max_output_tokens}")
+                    resp = client.chat.completions.create(**payload)
+                    return (resp.choices[0].message.content or "").strip()
+                except Exception as e:
+                    last_err = e
+                    msg = str(e)
+                    # Fallback for providers that don't accept max_tokens (e.g., some OpenRouter models)
+                    if "Unsupported parameter" in msg and ("max_tokens" in msg or "max_completion_tokens" in msg):
+                        try:
+                            payload_no_max = {
+                                "model": m,
+                                "messages": ([{"role": "system", "content": system}] + messages),
+                                "temperature": temperature,
+                                "top_p": top_p,
+                            }
+                            print(f"LLM call → retry without max_tokens provider=openai model={m}")
+                            resp = client.chat.completions.create(**payload_no_max)
+                            return (resp.choices[0].message.content or "").strip()
+                        except Exception as e2:
+                            last_err = e2
+                    if any(code in msg for code in ["429", "500", "502", "503", "504"]):
+                        import time
+                        time.sleep(0.5 * (attempt + 1))
+                        continue
+                    break
+        raise RuntimeError(f"LLM chat failed for model {model}: {last_err}")
     
     def _initialize_prompts(self):
         """Initialize strict prompt templates for different answer levels."""
         self.PROMPTS = {
-            "textbook": """You are a strict textbook assistant. You must follow these rules exactly:
+            "textbook": """
+You are a teaching assistant. Give a short, precise, structured answer using only the textbook content provided.
+Output format (plain text, no Markdown) exactly as follows:
 
-STRICT RULES:
-1. Use ONLY the information provided in the textbook content below
-2. Do not add any external knowledge, examples, or explanations not in the textbook
-3. If the textbook content doesn't fully answer the question, say "The textbook doesn't provide enough information to fully answer this question"
-4. Use the exact terminology and explanations from the textbook
-5. Keep answers simple and directly based on the textbook text
+Answer:
+[one-line definition]
 
-TEXTBOOK CONTENT:
+Key Points:
+1. First fact (short sentence).
+2. Second fact (short sentence).
+3. Third fact (short sentence).
+
+Rules:
+- Do NOT use Markdown symbols like ##, ###, or **bold**.
+- Always use "Answer:" and "Key Points:" as plain text headings.
+- Keep answers short and factual; no long paragraphs.
+
+Context (use only this):
 {context}
 
-QUESTION: {question}
+Question: {question}
+""",
+            "detailed": """
+You are a teacher explaining to middle school students. Expand on the textbook content in a clear and engaging way.
+Output format (plain text, no Markdown) exactly as follows:
 
-ANSWER (using only the textbook content above):""",
-            
-            "detailed": """You are an educational assistant helping students understand textbook concepts better.
+Answer:
+[2–3 sentences introduction]
 
-TASK:
-1. Use the textbook content below as your primary and main source
-2. Explain the concept in a clearer, more detailed way
-3. Add simple analogies or examples that help understanding (but don't contradict the textbook)
-4. Enhance the textbook explanation to make it more accessible
-5. Target middle school students
+Key Components:
+1. Concept 1 → explained simply in 2–3 lines.
+2. Concept 2 → explained simply in 2–3 lines.
+3. Concept 3 → add a fun fact or real-life example.
 
-TEXTBOOK CONTENT:
+How It Works:
+- Bullet 1
+- Bullet 2
+- Bullet 3
+
+Rules:
+- Do NOT use Markdown symbols like ##, ###, or **bold**.
+- Use plain headings like "Answer:", "Key Components:", "How It Works:".
+- Keep paragraphs max 3 lines.
+
+Context (use only this):
 {context}
 
-QUESTION: {question}
+Question: {question}
+""",
+            "advanced": """
+You are an expert science explainer. Provide a deep, structured answer while still keeping it readable.
+Output format (plain text, no Markdown) exactly as follows:
 
-DETAILED EXPLANATION (based on textbook with helpful enhancements):""",
-            
-            "advanced": """You are an advanced science educator providing comprehensive explanations.
+Advanced Explanation:
 
-TASK:
-1. Provide a deep, structured explanation using your scientific knowledge
-2. Include scientific reasoning, historical context, and real-world applications
-3. Go beyond basic textbook explanations with advanced concepts
-4. Target high school level or above
-5. Use textbook content as minimal reference only
+Scientific View:
+- Point 1
+- Point 2
 
-REFERENCE CONTENT (if available):
+Historical Context:
+- Point 1
+- Point 2
+
+Real-World Applications:
+- Point 1
+- Point 2
+
+Conclusion:
+[2 short sentences]
+
+Rules:
+- Do NOT use Markdown symbols like ##, ###, or **bold**.
+- Always use plain headings exactly as shown: "Scientific View:", "Historical Context:", etc.
+- Keep content structured with bullets; avoid long paragraphs.
+
+Context (use only this):
 {context}
 
-QUESTION: {question}
-
-ADVANCED COMPREHENSIVE EXPLANATION:"""
+Question: {question}
+"""
         }
     
     def _initialize_textbook_vector_store(self):
@@ -261,8 +358,13 @@ ADVANCED COMPREHENSIVE EXPLANATION:"""
                 context=context,
                 question=message
             )
-            response = config["llm"].invoke(prompt)
-            answer = response.content.strip()
+            model = self.task_router["chat"]["textbook"]["model"]
+            answer = self._openai_chat(
+                model=model,
+                system="You are a strict textbook assistant.",
+                messages=[{"role": "user", "content": prompt}],
+                max_output_tokens=int(os.getenv("LLM_MAX_TOKENS_ANSWER", "850")),
+            )
             # Validate answer quality
             if any(phrase in answer.lower() for phrase in [
                 "i don't have information",
@@ -327,8 +429,13 @@ ADVANCED COMPREHENSIVE EXPLANATION:"""
                 question=message
             )
             
-            response = config["llm"].invoke(prompt)
-            return response.content.strip()
+            model = self.task_router["chat"]["detailed"]["model"]
+            return self._openai_chat(
+                model=model,
+                system="You improve textbook explanations for students.",
+                messages=[{"role": "user", "content": prompt}],
+                max_output_tokens=int(os.getenv("LLM_MAX_TOKENS_ANSWER", "850")),
+            )
             
         except Exception as e:
             print(f"❌ Error generating detailed answer: {e}")
@@ -360,8 +467,13 @@ ADVANCED COMPREHENSIVE EXPLANATION:"""
                 question=message
             )
             
-            response = config["llm"].invoke(prompt)
-            return response.content.strip()
+            model = self.task_router["chat"]["advanced"]["model"]
+            return self._openai_chat(
+                model=model,
+                system="You are an advanced science educator.",
+                messages=[{"role": "user", "content": prompt}],
+                max_output_tokens=int(os.getenv("LLM_MAX_TOKENS_ANSWER", "900")),
+            )
             
         except Exception as e:
             print(f"❌ Error generating advanced answer: {e}")
@@ -397,54 +509,56 @@ ADVANCED COMPREHENSIVE EXPLANATION:"""
             return f"Error generating {level} explanation. Please try again."
     
     def generate_suggested_questions(self, context: str) -> List[str]:
-        """Generate suggested questions based on the context."""
+        """Generate suggested questions using OpenAI with smart fallback."""
         try:
-            if len(context) < 30:
+            if not context or len(context) < 30:
                 return self._get_fallback_questions()
-            
-            prompt = f"""Based on this educational content about science, suggest exactly 3 follow-up questions that a student might ask to learn more.
 
-Content: {context[:400]}
-
-Requirements:
-- Questions should be directly related to the content
-- Suitable for middle school students  
-- End with question marks
-- Be specific and clear
-
-Provide only the 3 questions, one per line:"""
-            
+            system = "You generate concise, specific follow-up questions for students. Output strict JSON array of 3 strings."
+            prompt = (
+                "Given this educational content, produce exactly 3 follow-up questions a middle school student might ask to learn more. "
+                "- Keep each under 120 characters. - End with a question mark. - Be specific to the content.\n\n"
+                f"Content:\n{context[:800]}\n\nReturn JSON array only, e.g., [\"Q1?\", \"Q2?\", \"Q3?\"]."
+            )
+            print(f"🔍 Generating suggested questions for context: {context[:100]}...")
             response = self.llm_detailed.invoke(prompt)
-            
-            # Parse response
-            lines = [line.strip() for line in response.content.split('\n') if line.strip()]
-            
-            questions = []
-            for line in lines:
-                # Clean the line
-                clean_line = line.strip()
-                # Remove numbering
-                for prefix in ['1.', '2.', '3.', '-', '•', '*']:
-                    if clean_line.startswith(prefix):
-                        clean_line = clean_line[len(prefix):].strip()
-                
-                # Ensure question mark
-                if clean_line and not clean_line.endswith('?'):
-                    clean_line += '?'
-                
-                if clean_line and 10 < len(clean_line) < 150:
-                    questions.append(clean_line)
-            
-            # Return exactly 3 questions
+            raw = response.content
+            print(f"📝 Raw response: {raw[:200]}...")
+            try:
+                data = json.loads(raw)
+                questions = [q.strip() for q in data if isinstance(q, str)]
+            except Exception:
+                lines = [line.strip() for line in raw.split('\n') if line.strip()]
+                questions = []
+                for line in lines:
+                    clean = line
+                    for prefix in ['1.', '2.', '3.', '-', '•', '*']:
+                        if clean.startswith(prefix):
+                            clean = clean[len(prefix):].strip()
+                    if clean and not clean.endswith('?'):
+                        clean += '?'
+                    if 10 < len(clean) < 150:
+                        questions.append(clean)
             if len(questions) >= 3:
                 return questions[:3]
-            else:
-                # Pad with fallbacks if needed
-                fallbacks = self._get_fallback_questions()
-                while len(questions) < 3:
-                    questions.append(fallbacks[len(questions)])
-                return questions[:3]
-            
+            # Heuristic fallback: build context-specific questions from keywords
+            import re
+            words = [w.lower() for w in re.findall(r"[A-Za-z][A-Za-z\-]{2,}", context)][:400]
+            stop = {
+                "the","and","that","with","from","this","these","those","into","about","which","their","there","have","has","will","would","could","should","for","are","was","were","been","being","than","then","also","such","other","more","most","very","over","under","between","within","without","using","use","used","based","including","example","examples","because","while","when","where","what","why","how"
+            }
+            keywords = [w for w in words if w not in stop]
+            topic = keywords[0] if keywords else "this topic"
+            rel = keywords[1] if len(keywords) > 1 else topic
+            extra = keywords[2] if len(keywords) > 2 else rel
+            heuristic = [
+                f"Can you explain {topic} in more detail?",
+                f"How does {topic} relate to {rel}?",
+                f"What are the key factors that influence {extra}?",
+            ]
+            while len(heuristic) < 3:
+                heuristic.append(self._get_fallback_questions()[len(heuristic)])
+            return heuristic[:3]
         except Exception as e:
             print(f"❌ Error generating questions: {e}")
             return self._get_fallback_questions()
@@ -527,6 +641,7 @@ Provide only the 3 questions, one per line:"""
                 for mode in ["textbook", "detailed", "advanced"]
             ),
             "api_key_configured": bool(self.openai_api_key),
+            "routing": self.task_router,
             "mode_configurations": {
                 mode: {
                     "max_chunks": config["max_chunks"],

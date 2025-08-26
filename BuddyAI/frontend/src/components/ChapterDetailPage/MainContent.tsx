@@ -80,7 +80,7 @@ const MainContent: React.FC<MainContentProps> = ({
         </div>
         
         {/* Header Right Component */}
-        <HeaderRight />
+        <HeaderRight pageLang={'en'} />
       </div>
 
       {/* Chapter Buttons Component */}

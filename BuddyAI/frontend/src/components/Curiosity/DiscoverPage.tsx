@@ -111,7 +111,7 @@ const InnerDiscover: React.FC = () => {
             </div>
             <TranslateDropdown onChange={(m)=>{/* language handled at layout level if needed */}} />
           </div>
-          <HeaderRight />
+          <HeaderRight pageLang={'en'} />
         </div>
 
         {/* Main panel */}
